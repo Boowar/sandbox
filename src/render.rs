@@ -259,6 +259,7 @@ pub fn draw(
     zoom: f64,
     cam_x: f64,
     cam_y: f64,
+    build_flash: Option<(usize, f64)>,
 ) {
     let cw = W as f64 * CELL;
     let ch = H as f64 * CELL;
@@ -317,6 +318,12 @@ pub fn draw(
             let sy = by + (i / 6) as f64 * 8.0;
             draw_building(ctx, sx, sy, *k, t.r, t.g, t.b);
         }
+        if let Some((fl, ft)) = build_flash {
+            if fl == i && ft > 0.0 {
+                ctx.set_stroke_style_str(&format!("rgba(255,255,255,{:.2})", ft * 0.9));
+                ctx.stroke_rect(t.x as f64 * CELL - 8.0, t.y as f64 * CELL - 8.0, 24.0, 24.0);
+            }
+        }
         if let Some((kind, progress)) = t.queue.first() {
             let slot = t.built.len();
             let sx = bx + (slot % 6) as f64 * 8.0;
@@ -372,11 +379,12 @@ pub fn draw(
         .iter()
         .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Well).count())
         .sum();
+    let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let lines = [
         format!("tick {}", sim.tick_count),
         format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
-        format!("houses {}  wells {}", houses, wells),
+        format!("houses {}  wells {}  in_queue {}", houses, wells, pending),
         format!("fps {:.0}  speed x{:.1}{}", fps, speed, if paused { "  [PAUSED]" } else { "" }),
         String::new(),
         "Space: пауза   B: 🌱  1: 🏠  2: ⛲  R: мир".to_string(),

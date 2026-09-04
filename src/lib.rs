@@ -48,6 +48,7 @@ struct App {
     pinch_prev_mx: f64,
     pinch_prev_my: f64,
     build_cursor: usize,
+    build_flash: Option<(usize, f64)>,
 }
 
 impl App {
@@ -82,6 +83,12 @@ impl App {
             self.fps_frames = 0;
             self.fps_time = 0.0;
         }
+        if let Some((_, t)) = self.build_flash.as_mut() {
+            *t -= dt;
+            if *t <= 0.0 {
+                self.build_flash = None;
+            }
+        }
         for e in self.effects.iter_mut() {
             e.life -= 1.0;
         }
@@ -99,6 +106,7 @@ impl App {
             self.zoom,
             self.cam_x,
             self.cam_y,
+            self.build_flash,
         );
     }
 
@@ -242,6 +250,7 @@ impl App {
         let ti = self.build_cursor % n;
         self.sim.borrow_mut().build_request(ti, kind);
         self.build_cursor += 1;
+        self.build_flash = Some((ti, 1.0));
     }
 
     fn on_key(&mut self, e: KeyboardEvent) {
@@ -325,6 +334,7 @@ pub fn start() -> Result<(), JsValue> {
         pinch_prev_mx: 0.0,
         pinch_prev_my: 0.0,
         build_cursor: 0,
+        build_flash: None,
     }));
     app.borrow().sync_ui();
 

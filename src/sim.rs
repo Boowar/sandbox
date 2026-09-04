@@ -304,7 +304,7 @@ impl Sim {
             self.towns.push(Settlement {
                 x: cx,
                 y: cy,
-                stocks: Stock { food: 80.0, water: 40.0, ore: 0.0 },
+                stocks: Stock { food: 80.0, water: 40.0, ore: 40.0 },
                 r,
                 g,
                 b,
