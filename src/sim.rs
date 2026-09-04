@@ -84,6 +84,8 @@ pub struct Agent {
     pub energy: f32,
     pub want: ResourceKind,
     pub carry: Option<(ResourceKind, f32)>,
+    pub family: usize,
+    pub founder: bool,
 }
 
 pub struct Settlement {
@@ -96,6 +98,16 @@ pub struct Settlement {
     pub cap: usize,
     pub queue: Vec<(BuildingKind, f32)>,
     pub built: Vec<BuildingKind>,
+}
+
+pub struct Family {
+    pub id: usize,
+    pub town: usize,
+    pub members: u32,
+    pub children: u32,
+    pub name: String,
+    pub extinct: bool,
+    pub accent: (u8, u8, u8),
 }
 
 enum Action {
@@ -111,6 +123,7 @@ pub struct Sim {
     pub grid: Vec<Cell>,
     pub agents: Vec<Agent>,
     pub towns: Vec<Settlement>,
+    pub families: Vec<Family>,
     pub tick_count: u64,
     rng: u64,
 }
@@ -142,6 +155,7 @@ impl Sim {
             grid,
             agents: Vec::new(),
             towns: Vec::new(),
+            families: Vec::new(),
             tick_count: 0,
             rng,
         };
@@ -286,8 +300,31 @@ impl Sim {
         }
     }
 
+    fn family_name(rng: &mut u64) -> String {
+        const SYL_A: [&str; 16] = [
+            "Ару", "Бер", "Вил", "Гар", "Дон", "Же", "Ир", "Йор", "Кел", "Лаш", "Мор", "Нюас",
+            "Орм", "Пел", "Рай", "Сел",
+        ];
+        const SYL_B: [&str; 16] = [
+            "дар", "рин", "валь", "тор", "гун", "жей", "мил", "холь", "зен", "фель", "кон", "сар",
+            "мир", "таль", "нуар", "вик",
+        ];
+        let a = SYL_A[rnd(rng) as usize % SYL_A.len()];
+        let b = SYL_B[rnd(rng) as usize % SYL_B.len()];
+        format!("{}{}", a, b)
+    }
+
+    fn family_accent(found_count: usize, r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+        match found_count % 3 {
+            0 => (r, g.min(120), 230),
+            1 => (230, g, b.min(120)),
+            _ => (r, g, b),
+        }
+    }
+
     fn spawn_world(&mut self) {
         const PALETTE: [(u8, u8, u8); 3] = [(255, 209, 102), (6, 214, 160), (239, 71, 111)];
+        const FAMILIES_PER_TOWN: usize = 2;
         let per = W as i32 / (PALETTE.len() + 1) as i32;
         for (i, &(r, g, b)) in PALETTE.iter().enumerate() {
             let cx = per * (i as i32 + 1);
@@ -312,14 +349,28 @@ impl Sim {
                 queue: Vec::new(),
                 built: Vec::new(),
             });
+            let base = self.families.len();
+            for k in 0..FAMILIES_PER_TOWN {
+                self.families.push(Family {
+                    id: base + k,
+                    town: i,
+                    members: 0,
+                    children: 0,
+                    name: Self::family_name(&mut self.rng),
+                    extinct: false,
+                    accent: Self::family_accent(k, r, g, b),
+                });
+            }
             let n = (rnd(&mut self.rng) % 14 + 12) as usize;
-            for _ in 0..n {
-                self.spawn_agent(i, cx, cy);
+            for j in 0..n {
+                let fam = base + j % FAMILIES_PER_TOWN;
+                let founder = j < FAMILIES_PER_TOWN;
+                self.spawn_agent(i, cx, cy, fam, founder);
             }
         }
     }
 
-    fn spawn_agent(&mut self, home: usize, cx: i32, cy: i32) {
+    fn spawn_agent(&mut self, home: usize, cx: i32, cy: i32, family: usize, founder: bool) {
         for _ in 0..64 {
             let ang = rfrac(&mut self.rng) * 6.2832;
             let r = rfrac(&mut self.rng) * 6.0 + 2.0;
@@ -337,7 +388,10 @@ impl Sim {
                     energy: 80.0 + rfrac(&mut self.rng) * 20.0,
                     want: ResourceKind::Food,
                     carry: None,
+                    family,
+                    founder,
                 });
+                self.families[family].members += 1;
                 return;
             }
         }
@@ -352,7 +406,10 @@ impl Sim {
             energy: 90.0,
             want: ResourceKind::Food,
             carry: None,
+            family,
+            founder,
         });
+        self.families[family].members += 1;
     }
 
     pub fn pop(&self, ti: usize) -> usize {
@@ -459,8 +516,9 @@ impl Sim {
         }
 
         if self.tick_count % BIRTH_EVERY == 0 {
-            self.births();
+            self.reproduction();
         }
+        self.sync_families();
     }
 
     fn decide(&self, a: &Agent) -> (Action, ResourceKind) {
@@ -728,22 +786,44 @@ impl Sim {
         }
     }
 
-    fn births(&mut self) {
+    fn reproduction(&mut self) {
         if self.agents.len() >= MAX_AGENTS {
             return;
         }
-        for ti in 0..self.towns.len() {
-            if self.pop(ti) >= self.towns[ti].cap {
+        let mut used_town = vec![false; self.towns.len()];
+        for fid in 0..self.families.len() {
+            let fam_town = self.families[fid].town;
+            if self.families[fid].extinct || self.families[fid].members < 2 {
                 continue;
             }
-            let st = &self.towns[ti].stocks;
+            if used_town[fam_town] {
+                continue;
+            }
+            if self.pop(fam_town) >= self.towns[fam_town].cap {
+                continue;
+            }
+            let st = &self.towns[fam_town].stocks;
             if st.food < BIRTH_MIN_FOOD || st.water < BIRTH_MIN_WATER {
                 continue;
             }
-            let (tx, ty) = (self.towns[ti].x, self.towns[ti].y);
-            self.towns[ti].stocks.food -= BIRTH_FOOD;
-            self.towns[ti].stocks.water -= BIRTH_WATER;
-            self.spawn_agent(ti, tx, ty);
+            let (tx, ty) = (self.towns[fam_town].x, self.towns[fam_town].y);
+            self.towns[fam_town].stocks.food -= BIRTH_FOOD;
+            self.towns[fam_town].stocks.water -= BIRTH_WATER;
+            self.spawn_agent(fam_town, tx, ty, fid, false);
+            self.families[fid].children += 1;
+            used_town[fam_town] = true;
+        }
+    }
+
+    fn sync_families(&mut self) {
+        for fam in self.families.iter_mut() {
+            let members = self
+                .agents
+                .iter()
+                .filter(|a| a.family == fam.id)
+                .count() as u32;
+            fam.members = members;
+            fam.extinct = members == 0;
         }
     }
 }
@@ -934,7 +1014,7 @@ mod tests {
         s.agents.retain(|a| a.home != 0);
         let (tx, ty) = (s.towns[0].x, s.towns[0].y);
         for _ in 0..2 {
-            s.spawn_agent(0, tx, ty);
+            s.spawn_agent(0, tx, ty, 0, false);
         }
         while s.tick_count % BIRTH_EVERY != BIRTH_EVERY - 1 {
             s.tick();
@@ -1016,6 +1096,50 @@ mod tests {
             assert!(ff >= 0.18, "seed {}: too little forest {:.1}%", seed, ff * 100.0);
             assert!(hf >= 0.06, "seed {}: too little hills {:.1}%", seed, hf * 100.0);
         }
+    }
+
+    #[test]
+    fn families_cover_agents_and_have_founders() {
+        let s = Sim::new(21);
+        assert_eq!(s.families.len(), s.towns.len() * 2);
+        assert!(s.agents.iter().all(|a| a.family < s.families.len()));
+        let fam_members: u32 = s.families.iter().map(|f| f.members).sum();
+        assert_eq!(fam_members as usize, s.agents.len());
+        assert!(s.agents.iter().any(|a| a.founder));
+    }
+
+    #[test]
+    fn reproduction_grows_families_with_children() {
+        let mut s = Sim::new(22);
+        for t in s.towns.iter_mut() {
+            t.cap = 200;
+        }
+        let mut children = 0u32;
+        for _ in 0..12000 {
+            s.tick();
+            children = s.families.iter().map(|f| f.children).sum();
+            if children > 0 {
+                break;
+            }
+        }
+        assert!(children > 0, "families should produce children");
+        assert!(s.agents.iter().all(|a| a.family < s.families.len()));
+    }
+
+    #[test]
+    fn single_member_family_cannot_reproduce() {
+        let mut s = Sim::new(23);
+        s.towns[0].cap = 200;
+        s.agents.retain(|a| a.home != 0);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.spawn_agent(0, tx, ty, 0, false);
+        s.towns[0].stocks.food = 500.0;
+        s.towns[0].stocks.water = 500.0;
+        s.towns[0].stocks.ore = 100.0;
+        for _ in 0..BIRTH_EVERY * 2 + 5 {
+            s.tick();
+        }
+        assert_eq!(s.families[0].children, 0, "single member cannot have children");
     }
 
     #[test]

@@ -334,13 +334,35 @@ pub fn draw(
         ctx.set_font("11px ui-monospace, monospace");
         ctx.set_fill_style_str("rgb(238,243,247)");
         let _ = ctx.fill_text(&sim.pop(i).to_string(), t.x as f64 * CELL + 13.0, t.y as f64 * CELL - 4.0);
+        if let Some(rul) = sim
+            .families
+            .iter()
+            .filter(|f| f.town == i && !f.extinct)
+            .max_by_key(|f| f.members)
+        {
+            if !rul.name.is_empty() {
+                ctx.set_font("10px ui-monospace, monospace");
+                ctx.set_fill_style_str("rgb(215,225,236)");
+                let _ = ctx.fill_text(&rul.name, t.x as f64 * CELL - 16.0, t.y as f64 * CELL + 8.0);
+            }
+        }
     }
 
     for (i, a) in sim.agents.iter().enumerate() {
         let t = &sim.towns[a.home];
         let fx = a.x as f64 * CELL + 2.0;
         let fy = a.y as f64 * CELL + 1.0;
+        if let Some(fam) = sim.families.get(a.family) {
+            let (fr, fg, fb) = fam.accent;
+            let alpha = if a.founder { 0.9 } else { 0.45 };
+            ctx.set_fill_style_str(&format!("rgba({},{},{},{:.2})", fr, fg, fb, alpha));
+            ctx.fill_rect(fx - 1.0, fy - 1.0, 4.0, 4.0);
+        }
         draw_agent(ctx, fx, fy, t.r, t.g, t.b, a.dir_x.clamp(-1, 1), i & 1);
+        if a.founder {
+            ctx.set_fill_style_str("rgb(255,222,120)");
+            ctx.fill_rect(fx, fy - 1.0, 2.0, 1.0);
+        }
         if let Some((kind, _)) = a.carry {
             let col = match kind {
                 crate::sim::ResourceKind::Food => "rgb(126,231,135)",
@@ -380,11 +402,14 @@ pub fn draw(
         .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Well).count())
         .sum();
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
+    let dynasty = sim.families.iter().filter(|f| !f.extinct).count();
+    let extinct = sim.families.len() - dynasty;
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let lines = [
         format!("tick {}", sim.tick_count),
         format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
         format!("houses {}  wells {}  in_queue {}", houses, wells, pending),
+        format!("dynasties {}  extinct {}", dynasty, extinct),
         format!("fps {:.0}  speed x{:.1}{}", fps, speed, if paused { "  [PAUSED]" } else { "" }),
         String::new(),
         "Space: пауза   B: 🌱  1: 🏠  2: ⛲  R: мир".to_string(),
