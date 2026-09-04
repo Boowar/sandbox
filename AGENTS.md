@@ -2,10 +2,19 @@
 
 ## Current state
 
-This is a brand-new project. The repository is empty: no source code, no build config, no git history yet. Do not assume any toolchain, framework, or project conventions until they are actually added.
+Rust → WebAssembly (wasm-bindgen / web-sys) проект — god-game «имитация жизни».
+Сборка и dev-сервер: Trunk 0.21.x. Рендер — Canvas 2D. Ветка по умолчанию: `main`.
 
-## Working here
+## Commands
 
-- There are no documented commands, tests, linters, or CI yet. Verify the current state of the repo before running or guessing at any command.
-- Before scaffolding, confirm the intended stack with the user — nothing technical has been decided in the repo itself.
-- Keep any generated instructions in sync here once a toolchain, build/test/lint commands, and conventions exist.
+- `cargo check` — быстрая проверка типов (host target)
+- `cargo test` — юнит-тесты симуляции (детерминированность, границы, еда, bless)
+- `trunk build --release` — production-сборка в `dist/`
+- `trunk serve` — dev-сервер с live-reload на http://localhost:8080
+
+## Conventions
+
+- Стек: Rust + wasm32-unknown-unknown, без других языков.
+- Симуляция детерминирована (Xorshift RNG). Визуальные фичи — в `render.rs`,
+  логика — в `sim.rs`.
+- Путь фичи: бриф в `PROJECT.md` → реализация → `cargo check` + `trunk build` → коммит.
