@@ -157,11 +157,9 @@ impl Sim {
         ];
         for cell in grid.iter_mut() {
             let p = rfrac(rng);
-            cell.terrain = if p < 0.22 {
-                Terrain::Water
-            } else if p < 0.36 {
+            cell.terrain = if p < 0.38 {
                 Terrain::Forest
-            } else if p < 0.46 {
+            } else if p < 0.55 {
                 Terrain::Hills
             } else {
                 Terrain::Grass
@@ -169,6 +167,7 @@ impl Sim {
             cell.food = FOOD_MAX;
             cell.ore = if cell.terrain == Terrain::Hills { ORE_MAX } else { 0.0 };
         }
+        Self::carve_lakes(rng, &mut grid);
         for _ in 0..4 {
             let mut next = grid.clone();
             for y in 0..H {
@@ -198,18 +197,20 @@ impl Sim {
                     }
                     next[i].terrain = match t {
                         Terrain::Water => {
-                            if water >= 5 { Terrain::Water } else { Terrain::Grass }
+                            if water >= 2 && tree < 3 { Terrain::Water } else { Terrain::Grass }
                         }
                         Terrain::Forest => {
-                            if tree >= 4 && water < 4 { Terrain::Forest } else { Terrain::Grass }
+                            if tree >= 3 && water < 3 { Terrain::Forest } else { Terrain::Grass }
                         }
                         Terrain::Hills => {
-                            if hill >= 4 && water < 4 { Terrain::Hills } else { Terrain::Grass }
+                            if hill >= 2 && water < 4 { Terrain::Hills } else { Terrain::Grass }
                         }
                         Terrain::Grass => {
-                            if water >= 5 {
+                            if water >= 4 {
                                 Terrain::Water
-                            } else if hill >= 5 && water < 4 {
+                            } else if tree >= 5 && water < 3 && hill < 4 {
+                                Terrain::Forest
+                            } else if hill >= 4 && water < 3 && tree < 4 {
                                 Terrain::Hills
                             } else {
                                 Terrain::Grass
@@ -224,6 +225,45 @@ impl Sim {
             grid = next;
         }
         grid
+    }
+
+    fn carve_lakes(rng: &mut u64, grid: &mut Vec<Cell>) {
+        let lakes = 4 + (rfrac(rng) * 3.0) as i32;
+        for _ in 0..lakes {
+            let radius: f64 = (5.0 + rfrac(rng) * 6.0) as f64;
+            let target = (std::f64::consts::PI * radius * radius * 0.85) as i32;
+            let margin = radius as i32 + 4;
+            let cx = margin + (rfrac(rng) as f64 * (W as i32 - 2 * margin) as f64) as i32;
+            let cy = margin + (rfrac(rng) as f64 * (H as i32 - 2 * margin) as f64) as i32;
+            let mut queue = vec![(cx, cy)];
+            queue.reverse();
+            let mut done = 0;
+            while let Some((x, y)) = queue.pop() {
+                if done >= target {
+                    break;
+                }
+                if !in_bounds(x, y) {
+                    continue;
+                }
+                let i = idx(x, y);
+                if grid[i].terrain == Terrain::Water {
+                    continue;
+                }
+                let dx = x - cx;
+                let dy = y - cy;
+                if ((dx * dx + dy * dy) as f64).sqrt() > radius {
+                    continue;
+                }
+                grid[i].terrain = Terrain::Water;
+                grid[i].food = FOOD_MAX;
+                grid[i].ore = 0.0;
+                done += 1;
+                queue.push((x + 1, y));
+                queue.push((x - 1, y));
+                queue.push((x, y + 1));
+                queue.push((x, y - 1));
+            }
+        }
     }
 
     fn ensure_hills(&mut self) {
@@ -953,6 +993,29 @@ mod tests {
             s.towns[0].stocks.water > w0,
             "well should regenerate water over time"
         );
+    }
+
+    #[test]
+    fn terrain_has_forests_and_water() {
+        for seed in 1..=6u64 {
+            let s = Sim::new(seed);
+            let mut forest = 0;
+            let mut water = 0;
+            let mut hills = 0;
+            for c in s.grid.iter() {
+                match c.terrain {
+                    Terrain::Forest => forest += 1,
+                    Terrain::Water => water += 1,
+                    Terrain::Hills => hills += 1,
+                    Terrain::Grass => {}
+                }
+            }
+            let n = (W * H) as f64;
+            let (wf, ff, hf) = (water as f64 / n, forest as f64 / n, hills as f64 / n);
+            assert!(wf >= 0.045, "seed {}: too little water {:.1}%", seed, wf * 100.0);
+            assert!(ff >= 0.18, "seed {}: too little forest {:.1}%", seed, ff * 100.0);
+            assert!(hf >= 0.06, "seed {}: too little hills {:.1}%", seed, hf * 100.0);
+        }
     }
 
     #[test]
