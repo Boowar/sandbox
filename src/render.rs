@@ -194,6 +194,59 @@ fn draw_agent(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64, r: u8, g: u8, b:
     }
 }
 
+fn draw_building(
+    ctx: &CanvasRenderingContext2d,
+    px: f64,
+    py: f64,
+    kind: crate::sim::BuildingKind,
+    r: u8,
+    g: u8,
+    b: u8,
+) {
+    match kind {
+        crate::sim::BuildingKind::House => {
+            let lr = shade(r, g, b, 1.5);
+            ctx.set_fill_style_str(&lr);
+            ctx.fill_rect(px + 1.0, py, 5.0, 1.0);
+            ctx.set_fill_style_str(&shade(r, g, b, 0.55));
+            ctx.fill_rect(px + 2.0, py + 1.0, 4.0, 3.0);
+            ctx.set_fill_style_str("rgb(38,34,30)");
+            ctx.fill_rect(px + 3.0, py + 2.0, 2.0, 2.0);
+        }
+        crate::sim::BuildingKind::Well => {
+            ctx.set_fill_style_str("rgb(105,105,110)");
+            ctx.fill_rect(px + 1.0, py, 4.0, 1.0);
+            ctx.fill_rect(px + 1.0, py + 3.0, 4.0, 2.0);
+            ctx.set_fill_style_str("rgb(88,166,255)");
+            ctx.fill_rect(px + 2.0, py + 3.0, 2.0, 2.0);
+            ctx.set_fill_style_str("rgb(70,70,76)");
+            ctx.fill_rect(px + 2.0, py + 1.0, 2.0, 2.0);
+        }
+    }
+}
+
+fn draw_scaffold(
+    ctx: &CanvasRenderingContext2d,
+    px: f64,
+    py: f64,
+    progress: f32,
+    cost: f32,
+    r: u8,
+    g: u8,
+    b: u8,
+) {
+    ctx.set_fill_style_str("rgba(0,0,0,0.15)");
+    ctx.fill_rect(px, py + 6.0, 7.0, 2.0);
+    ctx.set_fill_style_str("rgb(150,120,70)");
+    ctx.fill_rect(px, py, 7.0, 1.0);
+    ctx.fill_rect(px, py + 4.0, 7.0, 1.0);
+    ctx.fill_rect(px, py, 1.0, 5.0);
+    ctx.fill_rect(px + 6.0, py, 1.0, 5.0);
+    let k = (progress / cost).clamp(0.0, 1.0) as f64;
+    ctx.set_fill_style_str(&shade(r, g, b, 1.1));
+    ctx.fill_rect(px + 1.0, py + 1.0, 5.0 * k, 1.0);
+}
+
 pub fn draw(
     ctx: &CanvasRenderingContext2d,
     terrain: &HtmlCanvasElement,
@@ -258,6 +311,19 @@ pub fn draw(
 
     for (i, t) in sim.towns.iter().enumerate() {
         draw_house(ctx, t.x as f64 * CELL - 3.0, t.y as f64 * CELL - 2.0, t.r, t.g, t.b);
+        let (bx, by) = (t.x as f64 * CELL - 14.0, t.y as f64 * CELL + 15.0);
+        for (i, k) in t.built.iter().enumerate() {
+            let sx = bx + (i % 6) as f64 * 8.0;
+            let sy = by + (i / 6) as f64 * 8.0;
+            draw_building(ctx, sx, sy, *k, t.r, t.g, t.b);
+        }
+        if let Some((kind, progress)) = t.queue.first() {
+            let slot = t.built.len();
+            let sx = bx + (slot % 6) as f64 * 8.0;
+            let sy = by + (slot / 6) as f64 * 8.0;
+            draw_scaffold(ctx, sx, sy, *progress, kind.cost(), t.r, t.g, t.b);
+        }
+        let _ = i;
         ctx.set_font("11px ui-monospace, monospace");
         ctx.set_fill_style_str("rgb(238,243,247)");
         let _ = ctx.fill_text(&sim.pop(i).to_string(), t.x as f64 * CELL + 13.0, t.y as f64 * CELL - 4.0);
@@ -294,15 +360,26 @@ pub fn draw(
     }
 
     let food: f32 = sim.towns.iter().map(|t| t.stocks.food).sum();
-    let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let water: f32 = sim.towns.iter().map(|t| t.stocks.water).sum();
     let ore: f32 = sim.towns.iter().map(|t| t.stocks.ore).sum();
+    let houses: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::House).count())
+        .sum();
+    let wells: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Well).count())
+        .sum();
+    let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let lines = [
         format!("tick {}", sim.tick_count),
         format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
+        format!("houses {}  wells {}", houses, wells),
         format!("fps {:.0}  speed x{:.1}{}", fps, speed, if paused { "  [PAUSED]" } else { "" }),
         String::new(),
-        "Space: пауза   B: 🌱  R: мир".to_string(),
+        "Space: пауза   B: 🌱  1: 🏠  2: ⛲  R: мир".to_string(),
     ];
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);

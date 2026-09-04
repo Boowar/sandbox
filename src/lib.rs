@@ -47,6 +47,7 @@ struct App {
     pinch_prev_dist: f64,
     pinch_prev_mx: f64,
     pinch_prev_my: f64,
+    build_cursor: usize,
 }
 
 impl App {
@@ -233,12 +234,24 @@ impl App {
         }
     }
 
+    fn build(&mut self, kind: sim::BuildingKind) {
+        let n = self.sim.borrow().towns.len();
+        if n == 0 {
+            return;
+        }
+        let ti = self.build_cursor % n;
+        self.sim.borrow_mut().build_request(ti, kind);
+        self.build_cursor += 1;
+    }
+
     fn on_key(&mut self, e: KeyboardEvent) {
         match e.key().as_str() {
             " " => self.toggle_pause(),
             "+" | "=" => self.change_speed(1.0),
             "-" | "_" | "—" => self.change_speed(-1.0),
             "b" | "B" | "и" | "И" => self.toggle_bless(),
+            "1" => self.build(sim::BuildingKind::House),
+            "2" => self.build(sim::BuildingKind::Well),
             "r" | "R" | "к" | "К" => self.new_world(),
             _ => {}
         }
@@ -311,6 +324,7 @@ pub fn start() -> Result<(), JsValue> {
         pinch_prev_dist: 0.0,
         pinch_prev_mx: 0.0,
         pinch_prev_my: 0.0,
+        build_cursor: 0,
     }));
     app.borrow().sync_ui();
 
@@ -430,6 +444,12 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnFaster").ok_or("no btnFaster")?, &app, |a| {
         a.change_speed(1.0)
+    })?;
+    bind_click(&document.get_element_by_id("btnHouse").ok_or("no btnHouse")?, &app, |a| {
+        a.build(sim::BuildingKind::House)
+    })?;
+    bind_click(&document.get_element_by_id("btnWell").ok_or("no btnWell")?, &app, |a| {
+        a.build(sim::BuildingKind::Well)
     })?;
 
     let app_loop = Rc::clone(&app);

@@ -16,6 +16,12 @@ const BIRTH_MIN_FOOD: f32 = 30.0;
 const BIRTH_MIN_WATER: f32 = 20.0;
 const BIRTH_FOOD: f32 = 15.0;
 const BIRTH_WATER: f32 = 10.0;
+const BUILD_MIN_FOOD: f32 = 20.0;
+const BUILD_MIN_WATER: f32 = 10.0;
+const HOUSE_COST: f32 = 30.0;
+const WELL_COST: f32 = 20.0;
+const HOUSE_CAP_BONUS: usize = 4;
+const WELL_WATER_PER_TICK: f32 = 0.3;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Terrain {
@@ -36,6 +42,21 @@ pub enum ResourceKind {
     Food,
     Water,
     Ore,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum BuildingKind {
+    House,
+    Well,
+}
+
+impl BuildingKind {
+    pub fn cost(self) -> f32 {
+        match self {
+            BuildingKind::House => HOUSE_COST,
+            BuildingKind::Well => WELL_COST,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +93,9 @@ pub struct Settlement {
     pub r: u8,
     pub g: u8,
     pub b: u8,
+    pub cap: usize,
+    pub queue: Vec<(BuildingKind, f32)>,
+    pub built: Vec<BuildingKind>,
 }
 
 enum Action {
@@ -244,6 +268,9 @@ impl Sim {
                 r,
                 g,
                 b,
+                cap: 12,
+                queue: Vec::new(),
+                built: Vec::new(),
             });
             let n = (rnd(&mut self.rng) % 14 + 12) as usize;
             for _ in 0..n {
@@ -316,6 +343,44 @@ impl Sim {
         }
     }
 
+    pub fn build_request(&mut self, ti: usize, kind: BuildingKind) {
+        if ti < self.towns.len() {
+            self.towns[ti].queue.push((kind, 0.0));
+        }
+    }
+
+    fn construction(&mut self) {
+        for ti in 0..self.towns.len() {
+            let apply = {
+                let t = &mut self.towns[ti];
+                if t.queue.is_empty() {
+                    continue;
+                }
+                if t.stocks.food < BUILD_MIN_FOOD || t.stocks.water < BUILD_MIN_WATER {
+                    continue;
+                }
+                if t.stocks.ore < 1.0 {
+                    continue;
+                }
+                t.stocks.ore -= 1.0;
+                let (kind, progress) = &mut t.queue[0];
+                *progress += 1.0;
+                if *progress >= kind.cost() {
+                    Some(t.queue.remove(0).0)
+                } else {
+                    None
+                }
+            };
+            if let Some(k) = apply {
+                let t = &mut self.towns[ti];
+                t.built.push(k);
+                if k == BuildingKind::House {
+                    t.cap += HOUSE_CAP_BONUS;
+                }
+            }
+        }
+    }
+
     pub fn tick(&mut self) {
         self.tick_count += 1;
 
@@ -328,9 +393,20 @@ impl Sim {
             for cell in self.grid.iter_mut() {
                 if cell.terrain == Terrain::Forest {
                     cell.food = (cell.food + 1.0).min(FOOD_MAX);
+                } else if cell.terrain == Terrain::Hills {
+                    cell.ore = (cell.ore + 0.5).min(ORE_MAX);
                 }
             }
         }
+
+        for t in self.towns.iter_mut() {
+            let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
+            if wells > 0 {
+                t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32).min(200.0);
+            }
+        }
+
+        self.construction();
 
         let actions: Vec<(Action, ResourceKind)> = self.agents.iter().map(|a| self.decide(a)).collect();
         let mut dead = Vec::new();
@@ -617,7 +693,7 @@ impl Sim {
             return;
         }
         for ti in 0..self.towns.len() {
-            if self.pop(ti) >= 12 {
+            if self.pop(ti) >= self.towns[ti].cap {
                 continue;
             }
             let st = &self.towns[ti].stocks;
@@ -832,6 +908,51 @@ mod tests {
         assert_eq!(s.pop(0), before + 1, "population should grow with food+water");
         assert!(s.towns[0].stocks.food < f0, "births consume food");
         assert!(s.towns[0].stocks.water < w0, "births consume water");
+    }
+
+    #[test]
+    fn construction_completes_house_and_raises_cap() {
+        let mut s = Sim::new(15);
+        s.towns[0].stocks.food = 100.0;
+        s.towns[0].stocks.water = 100.0;
+        s.towns[0].stocks.ore = 400.0;
+        s.build_request(0, BuildingKind::House);
+        for _ in 0..HOUSE_COST as usize + 5 {
+            s.tick();
+        }
+        assert_eq!(s.towns[0].built, vec![BuildingKind::House]);
+        assert_eq!(s.towns[0].cap, 12 + HOUSE_CAP_BONUS);
+    }
+
+    #[test]
+    fn construction_stops_without_ore() {
+        let mut s = Sim::new(16);
+        s.agents.clear();
+        s.towns[0].stocks.food = 100.0;
+        s.towns[0].stocks.water = 100.0;
+        s.towns[0].stocks.ore = 5.0;
+        s.build_request(0, BuildingKind::Well);
+        for _ in 0..200 {
+            s.tick();
+        }
+        assert!(s.towns[0].built.is_empty(), "cannot build without ore");
+    }
+
+    #[test]
+    fn well_regenerates_water() {
+        let mut s = Sim::new(17);
+        s.towns[0].stocks.food = 100.0;
+        s.towns[0].stocks.water = 100.0;
+        s.towns[0].stocks.ore = 400.0;
+        s.build_request(0, BuildingKind::Well);
+        let w0 = s.towns[0].stocks.water;
+        for _ in 0..WELL_COST as usize + 50 {
+            s.tick();
+        }
+        assert!(
+            s.towns[0].stocks.water > w0,
+            "well should regenerate water over time"
+        );
     }
 
     #[test]
