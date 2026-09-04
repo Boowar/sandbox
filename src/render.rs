@@ -1,4 +1,4 @@
-use crate::sim::{Terrain, H, Sim, W};
+use crate::sim::{Terrain, TownIdea, Weather, H, Sim, W};
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
@@ -320,6 +320,33 @@ pub fn draw(
             ctx.fill_rect(t.x as f64 * CELL + 3.0, t.y as f64 * CELL - 7.0, 2.0, 2.0);
             ctx.fill_rect(t.x as f64 * CELL - 5.0, t.y as f64 * CELL - 1.0, 10.0, 1.0);
         }
+        if t.idea != TownIdea::None {
+            let (px, py) = (t.x as f64 * CELL + 5.0, t.y as f64 * CELL - 8.0);
+            match t.idea {
+                TownIdea::War => {
+                    ctx.set_fill_style_str("rgb(255,90,70)");
+                    ctx.fill_rect(px + 1.0, py - 2.0, 2.0, 2.0);
+                    ctx.fill_rect(px, py, 4.0, 2.0);
+                    ctx.set_fill_style_str("rgb(255,214,96)");
+                    ctx.fill_rect(px + 1.0, py, 2.0, 1.0);
+                }
+                TownIdea::Prosperity => {
+                    ctx.set_fill_style_str("rgb(126,231,135)");
+                    ctx.fill_rect(px + 1.0, py - 1.0, 1.0, 2.0);
+                    ctx.fill_rect(px + 2.0, py + 1.0, 1.0, 1.0);
+                    ctx.set_fill_style_str("rgb(255,222,120)");
+                    ctx.fill_rect(px + 2.0, py - 1.0, 1.0, 2.0);
+                }
+                TownIdea::Toil => {
+                    ctx.set_fill_style_str("rgb(228,190,84)");
+                    ctx.fill_rect(px, py + 1.0, 4.0, 1.0);
+                    ctx.fill_rect(px + 1.0, py, 2.0, 1.0);
+                    ctx.set_fill_style_str("rgb(238,243,247)");
+                    ctx.fill_rect(px, py - 1.0, 4.0, 1.0);
+                }
+                TownIdea::None => {}
+            }
+        }
         let (bx, by) = (t.x as f64 * CELL - 14.0, t.y as f64 * CELL + 15.0);
         for (i, k) in t.built.iter().enumerate() {
             let sx = bx + (i % 6) as f64 * 8.0;
@@ -388,6 +415,40 @@ pub fn draw(
         }
     }
 
+    match sim.weather {
+        Weather::Clear => {}
+        Weather::Rain => {
+            ctx.set_fill_style_str("rgba(150,190,255,0.18)");
+            let ph = tick as usize % 9;
+            for i in 0..100usize {
+                let wx = (i as f64 * 173.0 + ph as f64 * 5.0) % cw;
+                let wy = (i as f64 * 97.0 + ph as f64 * 8.0) % ch;
+                ctx.fill_rect(wx, wy, 1.0, 4.0);
+            }
+            ctx.set_fill_style_str("rgba(96,140,220,0.10)");
+            ctx.fill_rect(0.0, 0.0, cw, ch);
+        }
+        Weather::Heat => {
+            ctx.set_fill_style_str(&format!(
+                "rgba(255,140,40,{:.3})",
+                0.04 + (tick % 30) as f64 * 0.002
+            ));
+            ctx.fill_rect(0.0, 0.0, cw, ch);
+        }
+        Weather::Frost => {
+            ctx.set_fill_style_str("rgba(240,245,255,0.35)");
+            let ph = tick as usize % 7;
+            for i in 0..70usize {
+                let wx = (i as f64 * 131.0 + ph as f64 * 2.0) % cw;
+                let wy = (i as f64 * 61.0 + ph as f64 * 6.0) % ch;
+                ctx.fill_rect(wx, wy, 1.0, 1.0);
+                ctx.fill_rect(wx + 5.0, wy + 3.0, 1.0, 1.0);
+            }
+            ctx.set_fill_style_str("rgba(210,225,255,0.12)");
+            ctx.fill_rect(0.0, 0.0, cw, ch);
+        }
+    }
+
     for e in fxs {
         let k = (e.life / 26.0).clamp(0.0, 1.0) as f64;
         let rad = 2.0 + (1.0 - k) * 9.0;
@@ -418,16 +479,23 @@ pub fn draw(
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let dynasty = sim.families.iter().filter(|f| !f.extinct).count();
     let extinct = sim.families.len() - dynasty;
+    let ideas = sim.towns.iter().filter(|t| t.idea != TownIdea::None).count();
+    let weather_name = match sim.weather {
+        Weather::Clear => "☀ ясно",
+        Weather::Rain => "🌧 дождь",
+        Weather::Heat => "🔥 жара",
+        Weather::Frost => "❄ мороз",
+    };
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let lines = [
         format!("tick {}", sim.tick_count),
         format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
         format!("houses {}  wells {}  in_queue {}", houses, wells, pending),
-        format!("dynasties {}  extinct {}", dynasty, extinct),
-        format!("wars {}", sim.towns.iter().filter(|t| t.at_war).count()),
-        format!("fps {:.0}  speed x{:.1}{}", fps, speed, if paused { "  [PAUSED]" } else { "" }),
+        format!("dynasties {}  extinct {}  ideas {}  wars {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count()),
+        format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }),
         String::new(),
-        "Space: пауза   B: 🌱  1: 🏠  2: ⛲  R: мир".to_string(),
+        "Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string(),
+        "1: 🏠  2: ⛲  R: новый мир".to_string(),
     ];
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);

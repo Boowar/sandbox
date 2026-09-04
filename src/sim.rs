@@ -29,6 +29,24 @@ const ARMY_TARGETS_POP: usize = 8;
 const RAISE_FOOD: f32 = 20.0;
 const RAID_CHANCE_PER_TICK: f32 = 0.06;
 const RAID_TARGET_POP: usize = 6;
+const WEATHER_PLAYER_TIME: f64 = 640.0;
+const IDEA_TIME: f64 = 1200.0;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Weather {
+    Clear,
+    Rain,
+    Heat,
+    Frost,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum TownIdea {
+    None,
+    War,
+    Prosperity,
+    Toil,
+}
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
 const WELL_WATER_PER_TICK: f32 = 0.3;
@@ -113,6 +131,8 @@ pub struct Settlement {
     pub at_war: bool,
     pub raiders: u32,
     pub enemy: Option<usize>,
+    pub idea: TownIdea,
+    pub idea_left: f64,
 }
 
 pub struct Family {
@@ -140,6 +160,8 @@ pub struct Sim {
     pub towns: Vec<Settlement>,
     pub families: Vec<Family>,
     pub tick_count: u64,
+    pub weather: Weather,
+    pub weather_left: f64,
     rng: u64,
 }
 
@@ -172,6 +194,8 @@ impl Sim {
             towns: Vec::new(),
             families: Vec::new(),
             tick_count: 0,
+            weather: Weather::Clear,
+            weather_left: 0.0,
             rng,
         };
         sim.ensure_hills();
@@ -366,6 +390,8 @@ impl Sim {
                 at_war: false,
                 raiders: 0,
                 enemy: None,
+                idea: TownIdea::None,
+                idea_left: 0.0,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -483,7 +509,7 @@ impl Sim {
                 }
                 t.stocks.ore -= 1.0;
                 let (kind, progress) = &mut t.queue[0];
-                *progress += 1.0;
+                *progress += if t.idea == TownIdea::Toil { 2.0 } else { 1.0 };
                 if *progress >= kind.cost() {
                     Some(t.queue.remove(0).0)
                 } else {
@@ -502,16 +528,31 @@ impl Sim {
 
     pub fn tick(&mut self) {
         self.tick_count += 1;
+        self.weather_breath();
 
+        let hunger_rate = match self.weather {
+            Weather::Frost => 1.3,
+            _ => 1.1,
+        };
+        let thirst_rate = match self.weather {
+            Weather::Rain => 0.5,
+            Weather::Heat => 1.1,
+            _ => 0.8,
+        };
         for a in self.agents.iter_mut() {
-            a.hunger = (a.hunger + 1.1).min(140.0);
-            a.thirst = (a.thirst + 0.8).min(140.0);
+            a.hunger = (a.hunger + hunger_rate).min(140.0);
+            a.thirst = (a.thirst + thirst_rate).min(140.0);
         }
 
         if self.tick_count % REGROW_EVERY == 0 {
+            let berry = match self.weather {
+                Weather::Rain => 2.0,
+                Weather::Frost => 0.5,
+                _ => 1.0,
+            };
             for cell in self.grid.iter_mut() {
                 if cell.terrain == Terrain::Forest {
-                    cell.food = (cell.food + 1.0).min(FOOD_MAX);
+                    cell.food = (cell.food + berry).min(FOOD_MAX);
                 } else if cell.terrain == Terrain::Hills {
                     cell.ore = (cell.ore + 0.5).min(ORE_MAX);
                 }
@@ -522,6 +563,15 @@ impl Sim {
             let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
             if wells > 0 {
                 t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32).min(200.0);
+            }
+            if self.weather == Weather::Heat {
+                t.stocks.water = (t.stocks.water - 0.08).max(0.0);
+            }
+            if t.idea_left > 0.0 {
+                t.idea_left -= 1.0;
+                if t.idea_left <= 0.0 {
+                    t.idea = TownIdea::None;
+                }
             }
         }
 
@@ -543,6 +593,48 @@ impl Sim {
         }
         self.sync_families();
         self.war_step();
+    }
+
+    fn weather_breath(&mut self) {
+        if self.weather_left > 0.0 {
+            self.weather_left -= 1.0;
+            return;
+        }
+        let p = rfrac(&mut self.rng);
+        self.weather = if p < 0.55 {
+            Weather::Clear
+        } else if p < 0.7 {
+            Weather::Rain
+        } else if p < 0.85 {
+            Weather::Heat
+        } else {
+            Weather::Frost
+        };
+        self.weather_left = 300.0 + rfrac(&mut self.rng) as f64 * 400.0;
+    }
+
+    pub fn cycle_weather(&mut self) {
+        self.weather = match self.weather {
+            Weather::Clear => Weather::Rain,
+            Weather::Rain => Weather::Heat,
+            Weather::Heat => Weather::Frost,
+            Weather::Frost => Weather::Clear,
+        };
+        self.weather_left = WEATHER_PLAYER_TIME;
+    }
+
+    pub fn inspire(&mut self, ti: usize) {
+        if ti >= self.towns.len() {
+            return;
+        }
+        let t = &mut self.towns[ti];
+        t.idea = match t.idea {
+            TownIdea::None => TownIdea::War,
+            TownIdea::War => TownIdea::Prosperity,
+            TownIdea::Prosperity => TownIdea::Toil,
+            TownIdea::Toil => TownIdea::None,
+        };
+        t.idea_left = IDEA_TIME;
     }
 
     fn decide(&self, a: &Agent) -> (Action, ResourceKind) {
@@ -836,8 +928,13 @@ impl Sim {
                 continue;
             }
             let (tx, ty) = (self.towns[fam_town].x, self.towns[fam_town].y);
-            self.towns[fam_town].stocks.food -= BIRTH_FOOD;
-            self.towns[fam_town].stocks.water -= BIRTH_WATER;
+            let (cf, cw) = if self.towns[fam_town].idea == TownIdea::Prosperity {
+                (BIRTH_FOOD * 0.5, BIRTH_WATER * 0.5)
+            } else {
+                (BIRTH_FOOD, BIRTH_WATER)
+            };
+            self.towns[fam_town].stocks.food -= cf;
+            self.towns[fam_town].stocks.water -= cw;
             self.spawn_agent(fam_town, tx, ty, fid, false);
             self.families[fid].children += 1;
             used_town[fam_town] = true;
@@ -860,14 +957,18 @@ impl Sim {
                         self.muster_army(i, count);
                     } else if self.towns[i].stocks.food < 12.0 && self.towns[i].stocks.water < 8.0 {
                         self.end_war(i);
-                    } else if self.raiders_ok(&self.towns[i]) && rfrac(&mut self.rng) < PEACE_CHANCE_PER_TICK
+                    } else if self.towns[i].idea != TownIdea::War
+                        && self.raiders_ok(&self.towns[i])
+                        && rfrac(&mut self.rng) < PEACE_CHANCE_PER_TICK
                     {
                         self.end_war(i);
                     }
                 }
                 continue;
             }
-            if rfrac(&mut self.rng) < RAID_CHANCE_PER_TICK {
+            let chance = RAID_CHANCE_PER_TICK
+                * if self.towns[i].idea == TownIdea::War { 3.0 } else { 1.0 };
+            if rfrac(&mut self.rng) < chance {
                 self.try_raid(i);
             }
         }
@@ -1435,5 +1536,75 @@ mod tests {
         assert_eq!(s.towns[1].enemy, None);
         assert_eq!(s.towns[1].raiders, 0);
         assert!(s.agents.iter().all(|a| a.home != 1 || (!a.raider && a.target_town.is_none())));
+    }
+
+    #[test]
+    fn manual_weather_cycles() {
+        let mut s = Sim::new(36);
+        assert_eq!(s.weather, Weather::Clear);
+        s.cycle_weather();
+        assert_eq!(s.weather, Weather::Rain);
+        assert!(s.weather_left > 0.0);
+        s.cycle_weather();
+        assert_eq!(s.weather, Weather::Heat);
+        s.cycle_weather();
+        assert_eq!(s.weather, Weather::Frost);
+        s.cycle_weather();
+        assert_eq!(s.weather, Weather::Clear);
+    }
+
+    #[test]
+    fn weather_heat_dries_town_wells() {
+        let mut s = Sim::new(37);
+        prep_two_towns(&mut s);
+        s.towns[0].stocks.water = 50.0;
+        s.weather = Weather::Heat;
+        s.weather_left = 100.0;
+        s.tick();
+        assert!(s.towns[0].stocks.water < 50.0, "heat should evaporate town water");
+        assert_eq!(s.weather, Weather::Heat, "weather persists until timer expires");
+    }
+
+    #[test]
+    fn ideas_cycle_and_expire() {
+        let mut s = Sim::new(38);
+        prep_two_towns(&mut s);
+        assert_eq!(s.towns[0].idea, TownIdea::None);
+        s.inspire(0);
+        assert_eq!(s.towns[0].idea, TownIdea::War);
+        assert_eq!(s.towns[0].idea_left, IDEA_TIME);
+        s.inspire(0);
+        assert_eq!(s.towns[0].idea, TownIdea::Prosperity);
+        s.inspire(0);
+        assert_eq!(s.towns[0].idea, TownIdea::Toil);
+        s.inspire(0);
+        assert_eq!(s.towns[0].idea, TownIdea::None);
+    }
+
+    #[test]
+    fn prosperity_halves_birth_cost() {
+        let mut s = Sim::new(39);
+        prep_two_towns(&mut s);
+        let (tx0, ty0) = (s.towns[0].x, s.towns[0].y);
+        let (tx1, ty1) = (s.towns[1].x, s.towns[1].y);
+        let mut fid = 0usize;
+        for _ in 0..2 {
+            s.spawn_agent(0, tx0, ty0, fid, false);
+            s.spawn_agent(1, tx1, ty1, fid + 1, false);
+            fid += 2;
+            s.families[fid - 2].members = 2;
+            s.families[fid - 1].members = 2;
+        }
+        s.towns[0].idea = TownIdea::None;
+        s.towns[1].idea = TownIdea::Prosperity;
+        s.towns[0].cap = 60;
+        s.towns[1].cap = 60;
+        s.towns[0].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0 };
+        s.towns[1].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0 };
+        s.reproduction();
+        let cost_plain = 100.0 - s.towns[0].stocks.food;
+        let cost_blessed = 100.0 - s.towns[1].stocks.food;
+        assert!(cost_plain > 0.0 && cost_blessed > 0.0 && cost_blessed < cost_plain,
+            "prosperity should cheapen birth (blessed {} < plain {})", cost_blessed, cost_plain);
     }
 }

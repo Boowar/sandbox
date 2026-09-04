@@ -27,10 +27,12 @@ struct App {
     terrain_ctx: CanvasRenderingContext2d,
     paused: bool,
     bless_mode: bool,
+    inspire_mode: bool,
     pending_bless: Vec<(usize, usize)>,
     effects: Vec<render::Fx>,
     btn_pause: Element,
     btn_bless: Element,
+    btn_inspire: Element,
     speed_lbl: Element,
     speed: f64,
     acc: f64,
@@ -115,6 +117,8 @@ impl App {
             .set_inner_html(if self.paused { "▶" } else { "⏸" });
         self.btn_bless
             .set_inner_html(if self.bless_mode { "🌱ON" } else { "🌱" });
+        self.btn_inspire
+            .set_inner_html(if self.inspire_mode { "💡ON" } else { "💡" });
         self.speed_lbl.set_inner_html(&format!("x{:.1}", self.speed));
     }
 
@@ -125,7 +129,43 @@ impl App {
 
     fn toggle_bless(&mut self) {
         self.bless_mode = !self.bless_mode;
+        if self.bless_mode {
+            self.inspire_mode = false;
+        }
         self.sync_ui();
+    }
+
+    fn toggle_inspire(&mut self) {
+        self.inspire_mode = !self.inspire_mode;
+        if self.inspire_mode {
+            self.bless_mode = false;
+        }
+        self.sync_ui();
+    }
+
+    fn inspire_at(&mut self, client_x: i32, client_y: i32) {
+        if !self.inspire_mode {
+            return;
+        }
+        if let Some((gx, gy)) = self.to_grid(client_x as f64, client_y as f64) {
+            let mut best = None;
+            let mut bd = 4;
+            for (ti, t) in self.sim.borrow().towns.iter().enumerate() {
+                let d = (t.x as i32 - gx as i32).abs().max(t.y as i32 - gy as i32);
+                if d < bd {
+                    bd = d;
+                    best = Some(ti);
+                }
+            }
+            if let Some(ti) = best {
+                self.sim.borrow_mut().inspire(ti);
+                self.build_flash = Some((ti, 1.0));
+            }
+        }
+    }
+
+    fn cycle_weather(&mut self) {
+        self.sim.borrow_mut().cycle_weather();
     }
 
     fn change_speed(&mut self, d: f64) {
@@ -259,6 +299,8 @@ impl App {
             "+" | "=" => self.change_speed(1.0),
             "-" | "_" | "—" => self.change_speed(-1.0),
             "b" | "B" | "и" | "И" => self.toggle_bless(),
+            "i" | "I" | "ш" | "Ш" => self.toggle_inspire(),
+            "w" | "W" | "ц" | "Ц" => self.cycle_weather(),
             "1" => self.build(sim::BuildingKind::House),
             "2" => self.build(sim::BuildingKind::Well),
             "r" | "R" | "к" | "К" => self.new_world(),
@@ -300,6 +342,7 @@ pub fn start() -> Result<(), JsValue> {
 
     let btn_pause = document.get_element_by_id("btnPause").ok_or("no btnPause")?;
     let btn_bless = document.get_element_by_id("btnBless").ok_or("no btnBless")?;
+    let btn_inspire = document.get_element_by_id("btnInspire").ok_or("no btnInspire")?;
     let speed_lbl = document.get_element_by_id("speedlbl").ok_or("no speedlbl")?;
 
     let seed = Date::now() as u64;
@@ -313,10 +356,12 @@ pub fn start() -> Result<(), JsValue> {
         terrain_ctx,
         paused: false,
         bless_mode: false,
+        inspire_mode: false,
         pending_bless: Vec::new(),
         effects: Vec::new(),
         btn_pause: btn_pause.clone(),
         btn_bless: btn_bless.clone(),
+        btn_inspire: btn_inspire.clone(),
         speed_lbl,
         speed: 2.0,
         acc: 0.0,
@@ -361,6 +406,8 @@ pub fn start() -> Result<(), JsValue> {
                 app.drag_ptr = Some(id);
                 if app.bless_mode {
                     app.bless_at(e.client_x(), e.client_y());
+                } else if app.inspire_mode {
+                    app.inspire_at(e.client_x(), e.client_y());
                 }
             } else {
                 app.drag_ptr = None;
@@ -387,6 +434,8 @@ pub fn start() -> Result<(), JsValue> {
             } else if app.pointers.len() == 1 && app.drag_ptr == Some(id) {
                 if app.bless_mode {
                     app.bless_at(e.client_x(), e.client_y());
+                } else if app.inspire_mode {
+                    // остаёмся на месте: тап применяет идею, панорама отключена
                 } else {
                     app.pan_by(px - prev_x, py - prev_y);
                 }
@@ -446,6 +495,10 @@ pub fn start() -> Result<(), JsValue> {
 
     bind_click(&btn_pause, &app, |a| a.toggle_pause())?;
     bind_click(&btn_bless, &app, |a| a.toggle_bless())?;
+    bind_click(&btn_inspire, &app, |a| a.toggle_inspire())?;
+    bind_click(&document.get_element_by_id("btnWeather").ok_or("no btnWeather")?, &app, |a| {
+        a.cycle_weather()
+    })?;
     bind_click(&document.get_element_by_id("btnNew").ok_or("no btnNew")?, &app, |a| {
         a.new_world()
     })?;
