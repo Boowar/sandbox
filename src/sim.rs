@@ -3,19 +3,26 @@ pub const H: usize = 96;
 pub const TICK_DT: f64 = 0.08;
 
 const FOOD_MAX: f32 = 10.0;
+const ORE_MAX: f32 = 60.0;
 const SEEK_RADIUS: i32 = 26;
 const HOME_BOUND: f32 = 14.0;
 const CARRY_LIMIT: f32 = 20.0;
 const HUNGRY_AT: f32 = 60.0;
+const THIRSTY_AT: f32 = 60.0;
 const STARVE: f32 = 100.0;
 const BIRTH_EVERY: u64 = 220;
 const REGROW_EVERY: u64 = 22;
 const MAX_AGENTS: usize = 300;
+const BIRTH_MIN_FOOD: f32 = 30.0;
+const BIRTH_MIN_WATER: f32 = 20.0;
+const BIRTH_FOOD: f32 = 15.0;
+const BIRTH_WATER: f32 = 10.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Terrain {
     Grass,
     Forest,
+    Hills,
     Water,
 }
 
@@ -25,10 +32,25 @@ impl Terrain {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ResourceKind {
+    Food,
+    Water,
+    Ore,
+}
+
+#[derive(Clone, Copy)]
+pub struct Stock {
+    pub food: f32,
+    pub water: f32,
+    pub ore: f32,
+}
+
 #[derive(Clone)]
 pub struct Cell {
     pub terrain: Terrain,
     pub food: f32,
+    pub ore: f32,
 }
 
 pub struct Agent {
@@ -38,14 +60,16 @@ pub struct Agent {
     pub dir_x: i32,
     pub dir_y: i32,
     pub hunger: f32,
+    pub thirst: f32,
     pub energy: f32,
-    pub carried: f32,
+    pub want: ResourceKind,
+    pub carry: Option<(ResourceKind, f32)>,
 }
 
 pub struct Settlement {
     pub x: i32,
     pub y: i32,
-    pub stockpile: f32,
+    pub stocks: Stock,
     pub r: u8,
     pub g: u8,
     pub b: u8,
@@ -55,6 +79,7 @@ enum Action {
     Move(i32, i32),
     Stay,
     Eat,
+    Drink,
     Deposit,
     Die,
 }
@@ -97,25 +122,29 @@ impl Sim {
             tick_count: 0,
             rng,
         };
+        sim.ensure_hills();
         sim.spawn_world();
         sim
     }
 
     fn make_terrain(rng: &mut u64) -> Vec<Cell> {
         let mut grid = vec![
-            Cell { terrain: Terrain::Grass, food: FOOD_MAX };
+            Cell { terrain: Terrain::Grass, food: FOOD_MAX, ore: 0.0 };
             W * H
         ];
         for cell in grid.iter_mut() {
             let p = rfrac(rng);
             cell.terrain = if p < 0.22 {
                 Terrain::Water
-            } else if p < 0.46 {
+            } else if p < 0.36 {
                 Terrain::Forest
+            } else if p < 0.46 {
+                Terrain::Hills
             } else {
                 Terrain::Grass
             };
             cell.food = FOOD_MAX;
+            cell.ore = if cell.terrain == Terrain::Hills { ORE_MAX } else { 0.0 };
         }
         for _ in 0..4 {
             let mut next = grid.clone();
@@ -125,6 +154,7 @@ impl Sim {
                     let t = grid[i].terrain;
                     let mut water = 0;
                     let mut tree = 0;
+                    let mut hill = 0;
                     for dy in -1..=1 {
                         for dx in -1..=1 {
                             if dx == 0 && dy == 0 {
@@ -138,6 +168,7 @@ impl Sim {
                             match grid[idx(nx, ny)].terrain {
                                 Terrain::Water => water += 1,
                                 Terrain::Forest => tree += 1,
+                                Terrain::Hills => hill += 1,
                                 Terrain::Grass => {}
                             }
                         }
@@ -149,15 +180,47 @@ impl Sim {
                         Terrain::Forest => {
                             if tree >= 4 && water < 4 { Terrain::Forest } else { Terrain::Grass }
                         }
+                        Terrain::Hills => {
+                            if hill >= 4 && water < 4 { Terrain::Hills } else { Terrain::Grass }
+                        }
                         Terrain::Grass => {
-                            if water >= 5 { Terrain::Water } else { Terrain::Grass }
+                            if water >= 5 {
+                                Terrain::Water
+                            } else if hill >= 5 && water < 4 {
+                                Terrain::Hills
+                            } else {
+                                Terrain::Grass
+                            }
                         }
                     };
+                    if next[i].terrain == Terrain::Hills && next[i].ore <= 0.0 {
+                        next[i].ore = ORE_MAX;
+                    }
                 }
             }
             grid = next;
         }
         grid
+    }
+
+    fn ensure_hills(&mut self) {
+        let has_hill = self.grid.iter().any(|c| c.terrain == Terrain::Hills);
+        if has_hill {
+            return;
+        }
+        for (fx, fy) in [(W as i32 / 3, H as i32 / 3), (2 * W as i32 / 3, 2 * H as i32 / 3)] {
+            for dy in -4..=4 {
+                for dx in -4..=4 {
+                    let x = fx + dx;
+                    let y = fy + dy;
+                    if in_bounds(x, y) {
+                        let c = &mut self.grid[idx(x, y)];
+                        c.terrain = Terrain::Hills;
+                        c.ore = ORE_MAX;
+                    }
+                }
+            }
+        }
     }
 
     fn spawn_world(&mut self) {
@@ -178,7 +241,7 @@ impl Sim {
             self.towns.push(Settlement {
                 x: cx,
                 y: cy,
-                stockpile: 80.0,
+                stocks: Stock { food: 80.0, water: 40.0, ore: 0.0 },
                 r,
                 g,
                 b,
@@ -204,8 +267,10 @@ impl Sim {
                     dir_x: 0,
                     dir_y: 0,
                     hunger: rfrac(&mut self.rng) * 20.0,
+                    thirst: rfrac(&mut self.rng) * 20.0,
                     energy: 80.0 + rfrac(&mut self.rng) * 20.0,
-                    carried: 0.0,
+                    want: ResourceKind::Food,
+                    carry: None,
                 });
                 return;
             }
@@ -217,8 +282,10 @@ impl Sim {
             dir_x: 0,
             dir_y: 0,
             hunger: 10.0,
+            thirst: 10.0,
             energy: 90.0,
-            carried: 0.0,
+            want: ResourceKind::Food,
+            carry: None,
         });
     }
 
@@ -244,7 +311,7 @@ impl Sim {
                         c.food = FOOD_MAX;
                     }
                     Terrain::Forest => c.food = FOOD_MAX,
-                    Terrain::Water => {}
+                    Terrain::Hills | Terrain::Water => {}
                 }
             }
         }
@@ -255,6 +322,7 @@ impl Sim {
 
         for a in self.agents.iter_mut() {
             a.hunger = (a.hunger + 1.1).min(140.0);
+            a.thirst = (a.thirst + 0.8).min(140.0);
         }
 
         if self.tick_count % REGROW_EVERY == 0 {
@@ -265,9 +333,10 @@ impl Sim {
             }
         }
 
-        let actions: Vec<Action> = self.agents.iter().map(|a| self.decide(a)).collect();
+        let actions: Vec<(Action, ResourceKind)> = self.agents.iter().map(|a| self.decide(a)).collect();
         let mut dead = Vec::new();
-        for (i, act) in actions.into_iter().enumerate() {
+        for (i, (act, want)) in actions.into_iter().enumerate() {
+            self.agents[i].want = want;
             self.apply(i, act, &mut dead);
         }
         for &i in dead.iter().rev() {
@@ -279,46 +348,129 @@ impl Sim {
         }
     }
 
-    fn decide(&self, a: &Agent) -> Action {
-        if a.hunger >= STARVE {
-            return Action::Die;
+    fn decide(&self, a: &Agent) -> (Action, ResourceKind) {
+        if a.hunger >= STARVE || a.thirst >= STARVE {
+            return (Action::Die, a.want);
         }
         if a.energy <= 6.0 {
-            return Action::Stay;
+            return (Action::Stay, a.want);
         }
         let t = &self.towns[a.home];
         let (hx, hy) = (t.x, t.y);
         let at_home = (a.x - hx).abs() <= 1 && (a.y - hy).abs() <= 1;
 
-        if a.carried >= CARRY_LIMIT {
+        if let Some((kind, _)) = a.carry {
             if at_home {
-                Action::Deposit
+                (Action::Deposit, kind)
             } else {
                 let (nx, ny) = self.steer(a, hx, hy);
-                Action::Move(nx, ny)
+                (Action::Move(nx, ny), kind)
             }
-        } else if a.hunger >= HUNGRY_AT {
-            if at_home {
-                if self.towns[a.home].stockpile > 0.0 {
-                    Action::Eat
+        } else if at_home {
+            if a.hunger >= HUNGRY_AT {
+                if self.towns[a.home].stocks.food > 0.0 {
+                    (Action::Eat, a.want)
                 } else {
-                    Action::Stay
+                    self.gather_action(a, Some(ResourceKind::Food))
                 }
-            } else if a.carried > 0.0 {
-                let (nx, ny) = self.steer(a, hx, hy);
-                Action::Move(nx, ny)
-            } else if let Some((fx, fy)) = self.food_target(a.x, a.y) {
-                let (nx, ny) = self.steer(a, fx, fy);
-                Action::Move(nx, ny)
+            } else if a.thirst >= THIRSTY_AT {
+                if self.towns[a.home].stocks.water > 0.0 {
+                    (Action::Drink, a.want)
+                } else {
+                    self.gather_action(a, Some(ResourceKind::Water))
+                }
             } else {
-                self.wander(a)
+                self.gather_action(a, None)
             }
-        } else if let Some((fx, fy)) = self.food_target(a.x, a.y) {
-            let (nx, ny) = self.steer(a, fx, fy);
-            Action::Move(nx, ny)
         } else {
-            self.wander(a)
+            self.gather_action(a, None)
         }
+    }
+
+    fn gather_action(&self, a: &Agent, force: Option<ResourceKind>) -> (Action, ResourceKind) {
+        let kind = force.unwrap_or_else(|| self.most_needed(a.home));
+        let d = match kind {
+            ResourceKind::Food => self.food_target(a.x, a.y),
+            ResourceKind::Water => self.water_target(a.x, a.y),
+            ResourceKind::Ore => self.ore_target(a.x, a.y),
+        };
+        if let Some((fx, fy)) = d {
+            let (nx, ny) = self.steer(a, fx, fy);
+            (Action::Move(nx, ny), kind)
+        } else {
+            (self.wander(a), kind)
+        }
+    }
+
+    fn most_needed(&self, ti: usize) -> ResourceKind {
+        let s = &self.towns[ti].stocks;
+        let f = s.food / BIRTH_MIN_FOOD;
+        let w = s.water / BIRTH_MIN_WATER;
+        let o = s.ore / 15.0;
+        if w < f && w <= o {
+            ResourceKind::Water
+        } else if o < f {
+            ResourceKind::Ore
+        } else {
+            ResourceKind::Food
+        }
+    }
+
+    fn seek<F>(&self, x: i32, y: i32, pred: F) -> Option<(i32, i32)>
+    where
+        F: Fn(&Sim, i32, i32) -> bool,
+    {
+        for r in 1..=SEEK_RADIUS {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let nx = x + dx;
+                    let ny = y + dy;
+                    if in_bounds(nx, ny) && pred(self, nx, ny) {
+                        return Some((nx, ny));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn food_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
+        self.seek(x, y, |s, nx, ny| {
+            let c = &s.grid[idx(nx, ny)];
+            c.terrain == Terrain::Forest && c.food > 0.5
+        })
+    }
+
+    fn water_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
+        self.seek(x, y, |s, nx, ny| {
+            s.grid[idx(nx, ny)].terrain.walkable() && s.is_water_adj(nx, ny)
+        })
+    }
+
+    fn ore_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
+        self.seek(x, y, |s, nx, ny| {
+            let c = &s.grid[idx(nx, ny)];
+            c.terrain == Terrain::Hills && c.ore > 0.5
+        })
+    }
+
+    fn is_water_adj(&self, x: i32, y: i32) -> bool {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let nx = x + dx;
+                let ny = y + dy;
+                if in_bounds(nx, ny) && self.grid[idx(nx, ny)].terrain == Terrain::Water {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn steer(&self, a: &Agent, tx: i32, ty: i32) -> (i32, i32) {
@@ -374,44 +526,52 @@ impl Sim {
         (h % 7) as i32 - 3
     }
 
-    fn food_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
-        for r in 1..=SEEK_RADIUS {
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    if dx.abs() != r && dy.abs() != r {
-                        continue;
-                    }
-                    let nx = x + dx;
-                    let ny = y + dy;
-                    if in_bounds(nx, ny) {
-                        let c = &self.grid[idx(nx, ny)];
-                        if c.terrain == Terrain::Forest && c.food > 0.5 {
-                            return Some((nx, ny));
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-
     fn apply(&mut self, i: usize, act: Action, dead: &mut Vec<usize>) {
         match act {
             Action::Move(nx, ny) => {
-                let a = &mut self.agents[i];
-                if a.energy <= 0.0 {
+                let mut ok = true;
+                let (mut ox, mut oy) = (0, 0);
+                {
+                    let a = &self.agents[i];
+                    if a.energy <= 0.0 {
+                        ok = false;
+                    } else {
+                        ox = a.x;
+                        oy = a.y;
+                    }
+                }
+                if !ok {
                     return;
                 }
-                let (ox, oy) = (a.x, a.y);
+                let wadj = self.is_water_adj(nx, ny);
+                let a = &mut self.agents[i];
                 a.x = nx;
                 a.y = ny;
                 a.dir_x = (nx - ox).clamp(-1, 1);
                 a.dir_y = (ny - oy).clamp(-1, 1);
                 a.energy -= 0.6;
-                let c = &self.grid[idx(nx, ny)];
-                if a.carried < CARRY_LIMIT && c.terrain == Terrain::Forest && c.food > 0.5 {
-                    a.carried = (a.carried + 2.0).min(CARRY_LIMIT);
-                    self.grid[idx(nx, ny)].food -= 1.0;
+                if a.carry.is_none() {
+                    match a.want {
+                        ResourceKind::Food => {
+                            let c = &self.grid[idx(nx, ny)];
+                            if c.terrain == Terrain::Forest && c.food > 0.5 {
+                                self.grid[idx(nx, ny)].food -= 1.0;
+                                a.carry = Some((ResourceKind::Food, 2.0));
+                            }
+                        }
+                        ResourceKind::Water => {
+                            if wadj && self.grid[idx(nx, ny)].terrain.walkable() {
+                                a.carry = Some((ResourceKind::Water, 2.0));
+                            }
+                        }
+                        ResourceKind::Ore => {
+                            let c = &self.grid[idx(nx, ny)];
+                            if c.terrain == Terrain::Hills && c.ore > 0.5 {
+                                self.grid[idx(nx, ny)].ore -= 1.0;
+                                a.carry = Some((ResourceKind::Ore, 1.0));
+                            }
+                        }
+                    }
                 }
             }
             Action::Stay => {
@@ -420,18 +580,33 @@ impl Sim {
             }
             Action::Eat => {
                 let ti = self.agents[i].home;
-                if self.towns[ti].stockpile > 0.0 {
-                    self.towns[ti].stockpile -= 2.0;
+                if self.towns[ti].stocks.food > 0.0 {
+                    self.towns[ti].stocks.food -= 2.0;
                     let a = &mut self.agents[i];
                     a.hunger = (a.hunger - 30.0).max(0.0);
                     a.energy = (a.energy + 4.0).min(100.0);
                 }
             }
+            Action::Drink => {
+                let ti = self.agents[i].home;
+                if self.towns[ti].stocks.water > 0.0 {
+                    self.towns[ti].stocks.water -= 2.0;
+                    let a = &mut self.agents[i];
+                    a.thirst = (a.thirst - 30.0).max(0.0);
+                    a.energy = (a.energy + 2.0).min(100.0);
+                }
+            }
             Action::Deposit => {
                 let ti = self.agents[i].home;
                 let a = &mut self.agents[i];
-                self.towns[ti].stockpile += a.carried;
-                a.carried = 0.0;
+                if let Some((kind, qty)) = a.carry.take() {
+                    let st = &mut self.towns[ti].stocks;
+                    match kind {
+                        ResourceKind::Food => st.food += qty,
+                        ResourceKind::Water => st.water += qty,
+                        ResourceKind::Ore => st.ore += qty,
+                    }
+                }
                 a.hunger = (a.hunger - 5.0).max(0.0);
             }
             Action::Die => dead.push(i),
@@ -443,15 +618,16 @@ impl Sim {
             return;
         }
         for ti in 0..self.towns.len() {
-            let (mut stock, tx, ty) = {
-                let t = &self.towns[ti];
-                (t.stockpile, t.x, t.y)
-            };
-            if self.pop(ti) >= 12 || stock < 30.0 {
+            if self.pop(ti) >= 12 {
                 continue;
             }
-            stock -= 15.0;
-            self.towns[ti].stockpile = stock;
+            let st = &self.towns[ti].stocks;
+            if st.food < BIRTH_MIN_FOOD || st.water < BIRTH_MIN_WATER {
+                continue;
+            }
+            let (tx, ty) = (self.towns[ti].x, self.towns[ti].y);
+            self.towns[ti].stocks.food -= BIRTH_FOOD;
+            self.towns[ti].stocks.water -= BIRTH_WATER;
             self.spawn_agent(ti, tx, ty);
         }
     }
@@ -462,7 +638,14 @@ mod tests {
     use super::*;
 
     fn total_food(s: &Sim) -> f32 {
-        s.towns.iter().map(|t| t.stockpile).sum()
+        s.towns.iter().map(|t| t.stocks.food).sum()
+    }
+
+    fn stock_bits(s: &Sim) -> Vec<(u32, u32, u32)> {
+        s.towns
+            .iter()
+            .map(|t| (t.stocks.food.to_bits(), t.stocks.water.to_bits(), t.stocks.ore.to_bits()))
+            .collect()
     }
 
     #[test]
@@ -473,12 +656,14 @@ mod tests {
         for i in 0..a.grid.len() {
             assert_eq!(a.grid[i].terrain, b.grid[i].terrain);
             assert_eq!(a.grid[i].food.to_bits(), b.grid[i].food.to_bits());
+            assert_eq!(a.grid[i].ore.to_bits(), b.grid[i].ore.to_bits());
         }
         assert_eq!(a.agents.len(), b.agents.len());
         for i in 0..a.agents.len() {
             assert_eq!(a.agents[i].x, b.agents[i].x);
             assert_eq!(a.agents[i].y, b.agents[i].y);
             assert_eq!(a.agents[i].home, b.agents[i].home);
+            assert_eq!(a.agents[i].thirst.to_bits(), b.agents[i].thirst.to_bits());
         }
     }
 
@@ -495,12 +680,15 @@ mod tests {
             assert_eq!(i.x, j.x);
             assert_eq!(i.y, j.y);
             assert_eq!(i.hunger.to_bits(), j.hunger.to_bits());
+            assert_eq!(i.thirst.to_bits(), j.thirst.to_bits());
             assert_eq!(i.energy.to_bits(), j.energy.to_bits());
-            assert_eq!(i.carried.to_bits(), j.carried.to_bits());
+            assert_eq!(i.want, j.want);
+            assert_eq!(
+                i.carry.map(|(k, q)| (k, q.to_bits())),
+                j.carry.map(|(k, q)| (k, q.to_bits()))
+            );
         }
-        let fa: Vec<u32> = a.towns.iter().map(|t| t.stockpile.to_bits()).collect();
-        let fb: Vec<u32> = b.towns.iter().map(|t| t.stockpile.to_bits()).collect();
-        assert_eq!(fa, fb);
+        assert_eq!(stock_bits(&a), stock_bits(&b));
     }
 
     #[test]
@@ -560,17 +748,91 @@ mod tests {
     #[test]
     fn gathering_increases_stockpile() {
         let mut s = Sim::new(1);
-        let stock0 = s.towns[0].stockpile;
+        s.towns[0].stocks.food = 10.0;
+        s.towns[0].stocks.water = 150.0;
+        s.towns[0].stocks.ore = 100.0;
+        let s0 = s.towns[0].stocks.food;
         s.bless(s.towns[0].x, s.towns[0].y, 12);
-        let mut deposited = false;
+        let mut done = false;
         for _ in 0..3000 {
             s.tick();
-            if s.towns[0].stockpile > stock0 + 10.0 {
-                deposited = true;
+            if s.towns[0].stocks.food > s0 + 10.0 {
+                done = true;
                 break;
             }
         }
-        assert!(deposited, "stockpile should grow from gathering");
+        assert!(done, "food stock should grow from gathering");
+    }
+
+    #[test]
+    fn ore_mining_increases_ore_stock() {
+        let mut s = Sim::new(12);
+        let (x, y) = (s.towns[0].x, s.towns[0].y);
+        for dy in -5..=5 {
+            for dx in -5..=5 {
+                let nx = x + dx;
+                let ny = y + dy;
+                if in_bounds(nx, ny) {
+                    let c = &mut s.grid[idx(nx, ny)];
+                    c.terrain = Terrain::Hills;
+                    c.ore = ORE_MAX;
+                }
+            }
+        }
+        for _ in 0..3000 {
+            s.tick();
+            if s.towns[0].stocks.ore > 5.0 {
+                return;
+            }
+        }
+        panic!("ore stock should grow from mining");
+    }
+
+    #[test]
+    fn water_collection_increases_water_stock() {
+        let mut s = Sim::new(13);
+        let (x, y) = (s.towns[0].x, s.towns[0].y);
+        s.towns[0].stocks.food = 100.0;
+        s.towns[0].stocks.water = 0.0;
+        s.towns[0].stocks.ore = 100.0;
+        for dy in 2..=5 {
+            for dx in -5..=5 {
+                let nx = x + dx;
+                let ny = y + dy;
+                if in_bounds(nx, ny) {
+                    s.grid[idx(nx, ny)].terrain = Terrain::Water;
+                }
+            }
+        }
+        for _ in 0..3000 {
+            s.tick();
+            if s.towns[0].stocks.water > 5.0 {
+                return;
+            }
+        }
+        panic!("water stock should grow from shore collection");
+    }
+
+    #[test]
+    fn births_require_food_and_water() {
+        let mut s = Sim::new(14);
+        s.agents.retain(|a| a.home != 0);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        for _ in 0..2 {
+            s.spawn_agent(0, tx, ty);
+        }
+        while s.tick_count % BIRTH_EVERY != BIRTH_EVERY - 1 {
+            s.tick();
+        }
+        s.towns[0].stocks.food = 60.0;
+        s.towns[0].stocks.water = 40.0;
+        s.towns[0].stocks.ore = 100.0;
+        let before = s.pop(0);
+        let (f0, w0) = (s.towns[0].stocks.food, s.towns[0].stocks.water);
+        s.tick();
+        assert_eq!(s.pop(0), before + 1, "population should grow with food+water");
+        assert!(s.towns[0].stocks.food < f0, "births consume food");
+        assert!(s.towns[0].stocks.water < w0, "births consume water");
     }
 
     #[test]

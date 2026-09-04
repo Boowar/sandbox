@@ -81,6 +81,16 @@ fn paint_forest(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     }
 }
 
+fn paint_hills(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 96, 94, 100);
+    let h = hash2(x, y);
+    fill(buf, ax + ((h >> 3) % 2) as usize * 2, ay + ((h >> 5) % 2) as usize * 2, 2, 2, 76, 74, 82);
+    fill(buf, ax + 1, ay + 1, 2, 2, 112, 110, 118);
+    if (h >> 7) % 3 == 0 {
+        set_px(buf, ax + (h >> 9) as usize % 3, ay + (h >> 11) as usize % 3, 132, 130, 138);
+    }
+}
+
 pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
     let mut buf = vec![0u8; PW * PH * 4];
     for y in 0..H {
@@ -90,6 +100,7 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
                 Terrain::Water => paint_water(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Grass => paint_grass(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Forest => paint_forest(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Hills => paint_hills(&mut buf, ax, ay, x as i32, y as i32),
             }
         }
     }
@@ -222,6 +233,17 @@ pub fn draw(
         }
     }
 
+    ctx.set_fill_style_str("rgb(228,190,84)");
+    for y in 0..H {
+        for x in 0..W {
+            let c = &sim.grid[y * W + x];
+            if c.terrain == Terrain::Hills && c.ore > 0.5 {
+                ctx.fill_rect(x as f64 * CELL + 1.0, y as f64 * CELL + 3.0, 2.0, 2.0);
+                ctx.fill_rect(x as f64 * CELL + 4.0, y as f64 * CELL + 5.0, 2.0, 2.0);
+            }
+        }
+    }
+
     for (i, t) in sim.towns.iter().enumerate() {
         draw_house(ctx, t.x as f64 * CELL - 3.0, t.y as f64 * CELL - 2.0, t.r, t.g, t.b);
         ctx.set_font("11px ui-monospace, monospace");
@@ -231,16 +253,18 @@ pub fn draw(
 
     for (i, a) in sim.agents.iter().enumerate() {
         let t = &sim.towns[a.home];
-        draw_agent(
-            ctx,
-            a.x as f64 * CELL + 2.0,
-            a.y as f64 * CELL + 1.0,
-            t.r,
-            t.g,
-            t.b,
-            a.dir_x.clamp(-1, 1),
-            i & 1,
-        );
+        let fx = a.x as f64 * CELL + 2.0;
+        let fy = a.y as f64 * CELL + 1.0;
+        draw_agent(ctx, fx, fy, t.r, t.g, t.b, a.dir_x.clamp(-1, 1), i & 1);
+        if let Some((kind, _)) = a.carry {
+            let col = match kind {
+                crate::sim::ResourceKind::Food => "rgb(126,231,135)",
+                crate::sim::ResourceKind::Water => "rgb(88,166,255)",
+                crate::sim::ResourceKind::Ore => "rgb(228,190,84)",
+            };
+            ctx.set_fill_style_str(col);
+            ctx.fill_rect(fx + 1.0, fy - 1.0, 3.0, 1.0);
+        }
     }
 
     for e in fxs {
@@ -257,10 +281,12 @@ pub fn draw(
         ctx.fill_rect(e.x - 1.0, e.y - 1.0, 2.0, 2.0);
     }
 
-    let total: f32 = sim.towns.iter().map(|t| t.stockpile).sum();
+    let food: f32 = sim.towns.iter().map(|t| t.stocks.food).sum();
+    let water: f32 = sim.towns.iter().map(|t| t.stocks.water).sum();
+    let ore: f32 = sim.towns.iter().map(|t| t.stocks.ore).sum();
     let lines = [
         format!("tick {}", sim.tick_count),
-        format!("pop {}  food {}", sim.agents.len(), total as i32),
+        format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
         format!("fps {:.0}  speed x{:.1}{}", fps, speed, if paused { "  [PAUSED]" } else { "" }),
         String::new(),
         "Space: пауза   B: 🌱  R: мир".to_string(),
