@@ -470,9 +470,6 @@ pub fn draw(
         ctx.fill_rect(e.x - 1.0, e.y - 1.0, 2.0, 2.0);
     }
 
-    let food: f32 = sim.towns.iter().map(|t| t.stocks.food).sum();
-    let water: f32 = sim.towns.iter().map(|t| t.stocks.water).sum();
-    let ore: f32 = sim.towns.iter().map(|t| t.stocks.ore).sum();
     let houses: usize = sim
         .towns
         .iter()
@@ -494,17 +491,40 @@ pub fn draw(
         Weather::Frost => "❄ мороз",
     };
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
-    let lines = [
-        format!("tick {}", sim.tick_count),
-        format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
-        format!("houses {}  wells {}  in_queue {}", houses, wells, pending),
-        format!("dynasties {}  extinct {}  ideas {}  wars {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count()),
-        format!("workers {}  farmers {}  miners {}", sim.agents.iter().filter(|a| a.role == Role::Worker).count(), sim.agents.iter().filter(|a| a.role == Role::Farmer).count(), sim.agents.iter().filter(|a| a.role == Role::Miner).count()),
-        format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }),
-        String::new(),
-        "Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string(),
-        "1: 🏠  2: ⛲  R: новый мир".to_string(),
-    ];
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("tick {}", sim.tick_count));
+    lines.push(format!("pop {}  houses {}  wells {}  in_queue {}", sim.agents.len(), houses, wells, pending));
+    for (i, t) in sim.towns.iter().enumerate() {
+        let ruler = sim
+            .families
+            .iter()
+            .filter(|f| f.town == i && !f.extinct)
+            .max_by_key(|f| f.members)
+            .map(|f| f.name.as_str())
+            .filter(|n| !n.is_empty())
+            .unwrap_or("?");
+        let mark = if t.at_war {
+            "  ⚔"
+        } else {
+            match t.idea {
+                TownIdea::None => "",
+                TownIdea::War => "  ⚔",
+                TownIdea::Prosperity => "  🌿",
+                TownIdea::Toil => "  🔨",
+            }
+        };
+        lines.push(format!(
+            "{} {}  pop {}  f{} w{} o{}{}",
+            "◆", ruler, sim.pop(i),
+            t.stocks.food as i32, t.stocks.water as i32, t.stocks.ore as i32, mark
+        ));
+    }
+    lines.push(format!("dynasties {}  extinct {}  ideas {}  wars {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count()));
+    lines.push(format!("workers {}  farmers {}  miners {}", sim.agents.iter().filter(|a| a.role == Role::Worker).count(), sim.agents.iter().filter(|a| a.role == Role::Farmer).count(), sim.agents.iter().filter(|a| a.role == Role::Miner).count()));
+    lines.push(format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }));
+    lines.push(String::new());
+    lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
+    lines.push("1: 🏠  2: ⛲  R: новый мир".to_string());
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.set_stroke_style_str("rgb(70,78,90)");
@@ -512,8 +532,8 @@ pub fn draw(
     ctx.rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.stroke();
     ctx.set_font("13px ui-monospace, monospace");
-    ctx.set_fill_style_str("rgb(238,243,247)");
     for (i, l) in lines.iter().enumerate() {
+        ctx.set_fill_style_str(if i == 2 { "rgb(255,222,120)" } else { "rgb(238,243,247)" });
         let _ = ctx.fill_text(l, 10.0, 22.0 + i as f64 * 15.0);
     }
 }
