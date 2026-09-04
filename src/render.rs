@@ -203,7 +203,19 @@ pub fn draw(
     speed: f64,
     fps: f64,
     fxs: &[Fx],
+    zoom: f64,
+    cam_x: f64,
+    cam_y: f64,
 ) {
+    let cw = W as f64 * CELL;
+    let ch = H as f64 * CELL;
+    let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    ctx.set_fill_style_str("rgb(10,14,18)");
+    ctx.fill_rect(0.0, 0.0, cw, ch);
+    let tx = cw / 2.0 - cam_x * zoom;
+    let ty = ch / 2.0 - cam_y * zoom;
+    let _ = ctx.set_transform(zoom, 0.0, 0.0, zoom, tx, ty);
+    ctx.set_image_smoothing_enabled(false);
     let _ = ctx.draw_image_with_html_canvas_element(terrain, 0.0, 0.0);
 
     let phase = (tick / 2) as usize % 6;
@@ -282,6 +294,7 @@ pub fn draw(
     }
 
     let food: f32 = sim.towns.iter().map(|t| t.stocks.food).sum();
+    let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let water: f32 = sim.towns.iter().map(|t| t.stocks.water).sum();
     let ore: f32 = sim.towns.iter().map(|t| t.stocks.ore).sum();
     let lines = [

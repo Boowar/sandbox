@@ -6,7 +6,6 @@ const FOOD_MAX: f32 = 10.0;
 const ORE_MAX: f32 = 60.0;
 const SEEK_RADIUS: i32 = 26;
 const HOME_BOUND: f32 = 14.0;
-const CARRY_LIMIT: f32 = 20.0;
 const HUNGRY_AT: f32 = 60.0;
 const THIRSTY_AT: f32 = 60.0;
 const STARVE: f32 = 100.0;
