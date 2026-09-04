@@ -134,8 +134,10 @@ impl App {
 
     fn bless_at(&mut self, client_x: i32, client_y: i32) {
         if self.bless_mode {
-            if let Some((x, y)) = to_grid(&self.terrain, client_x as f64, client_y as f64) {
-                self.pending_bless.push((x, y));
+            if let Some(canvas) = self.ctx.canvas() {
+                if let Some((x, y)) = to_grid(&canvas, client_x as f64, client_y as f64) {
+                    self.pending_bless.push((x, y));
+                }
             }
         }
     }
