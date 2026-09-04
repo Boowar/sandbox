@@ -662,7 +662,7 @@ impl Sim {
         }
         let t = &self.towns[a.home];
         let (hx, hy) = (t.x, t.y);
-        let at_home = (a.x - hx).abs() <= 1 && (a.y - hy).abs() <= 1;
+        let at_home = (a.x - hx).abs() <= 3 && (a.y - hy).abs() <= 3;
 
         if let Some((kind, _)) = a.carry {
             if at_home {
@@ -684,11 +684,20 @@ impl Sim {
                 } else {
                     self.gather_action(a, Some(ResourceKind::Water))
                 }
+            } else if a.energy < 60.0 {
+                (Action::Stay, a.want)
             } else {
                 self.gather_action(a, None)
             }
         } else {
-            self.gather_action(a, None)
+            let hungry = a.hunger >= HUNGRY_AT && self.towns[a.home].stocks.food > 0.0;
+            let thirsty = a.thirst >= THIRSTY_AT && self.towns[a.home].stocks.water > 0.0;
+            if hungry || thirsty {
+                let (nx, ny) = self.steer(a, hx, hy);
+                (Action::Move(nx, ny), a.want)
+            } else {
+                self.gather_action(a, None)
+            }
         }
     }
 
@@ -1666,6 +1675,51 @@ mod tests {
         let cost_blessed = 100.0 - s.towns[1].stocks.food;
         assert!(cost_plain > 0.0 && cost_blessed > 0.0 && cost_blessed < cost_plain,
             "prosperity should cheapen birth (blessed {} < plain {})", cost_blessed, cost_plain);
+    }
+
+    #[test]
+    fn population_does_not_collapse() {
+        for seed in 1..10u64 {
+            let mut s = Sim::new(seed);
+            for _ in 0..150 {
+                s.tick();
+            }
+            let base = s.agents.len() as i32;
+            let mut worst = base;
+            let mut samples = Vec::new();
+            for _ in 0..1500 {
+                s.tick();
+                samples.push(s.agents.len() as i32);
+                if samples.len() > 200 {
+                    samples.remove(0);
+                }
+                if samples.len() == 200 {
+                    worst = worst.min(samples[0] - samples[199]);
+                }
+            }
+            eprintln!("seed {} base {} worst200drop {} end {}", seed, base, -worst, s.agents.len());
+            assert!(s.agents.len() > 0, "seed {} went extinct", seed);
+            assert!(
+                -worst < base / 2,
+                "seed {} lost too many agents in a fast wave ({} of {})", seed, -worst, base
+            );
+        }
+    }
+
+    #[test]
+    fn population_grows_over_long_run() {
+        let mut s = Sim::new(11);
+        for t in s.towns.iter_mut() {
+            t.cap = 200;
+        }
+        let start = s.agents.len();
+        let mut peak = start;
+        for _ in 0..12000 {
+            s.tick();
+            peak = peak.max(s.agents.len());
+        }
+        eprintln!("start {} peak {} end {}", start, peak, s.agents.len());
+        assert!(peak > start, "world should reproduce over time (start {} peak {})", start, peak);
     }
 
     #[test]
