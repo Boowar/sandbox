@@ -1,4 +1,4 @@
-use crate::sim::{Terrain, TownIdea, Weather, H, Sim, W};
+use crate::sim::{Role, Terrain, TownIdea, Weather, H, Sim, W};
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
@@ -398,6 +398,13 @@ pub fn draw(
             ctx.set_fill_style_str("rgb(255,222,120)");
             ctx.fill_rect(fx, fy - 1.0, 2.0, 1.0);
         }
+        let role_col = match a.role {
+            Role::Worker => "rgb(200,205,215)",
+            Role::Farmer => "rgb(126,231,135)",
+            Role::Miner => "rgb(228,190,84)",
+        };
+        ctx.set_fill_style_str(role_col);
+        ctx.fill_rect(fx + 3.0, fy + 2.0, 1.0, 1.0);
         if a.raider {
             ctx.set_fill_style_str("rgb(232,68,64)");
             ctx.fill_rect(fx + 3.0, fy - 1.0, 2.0, 1.0);
@@ -492,6 +499,7 @@ pub fn draw(
         format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
         format!("houses {}  wells {}  in_queue {}", houses, wells, pending),
         format!("dynasties {}  extinct {}  ideas {}  wars {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count()),
+        format!("workers {}  farmers {}  miners {}", sim.agents.iter().filter(|a| a.role == Role::Worker).count(), sim.agents.iter().filter(|a| a.role == Role::Farmer).count(), sim.agents.iter().filter(|a| a.role == Role::Miner).count()),
         format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }),
         String::new(),
         "Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string(),

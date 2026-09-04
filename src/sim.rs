@@ -47,6 +47,13 @@ pub enum TownIdea {
     Prosperity,
     Toil,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Role {
+    Worker,
+    Farmer,
+    Miner,
+}
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
 const WELL_WATER_PER_TICK: f32 = 0.3;
@@ -116,6 +123,7 @@ pub struct Agent {
     pub founder: bool,
     pub raider: bool,
     pub target_town: Option<usize>,
+    pub role: Role,
 }
 
 pub struct Settlement {
@@ -143,6 +151,7 @@ pub struct Family {
     pub name: String,
     pub extinct: bool,
     pub accent: (u8, u8, u8),
+    pub role: Role,
 }
 
 enum Action {
@@ -403,6 +412,11 @@ impl Sim {
                     name: Self::family_name(&mut self.rng),
                     extinct: false,
                     accent: Self::family_accent(k, r, g, b),
+                    role: match (base + k) % 3 {
+                        1 => Role::Farmer,
+                        2 => Role::Miner,
+                        _ => Role::Worker,
+                    },
                 });
             }
             let n = (rnd(&mut self.rng) % 14 + 12) as usize;
@@ -436,6 +450,7 @@ impl Sim {
                     founder,
                     raider: false,
                     target_town: None,
+                    role: self.families[family].role,
                 });
                 self.families[family].members += 1;
                 return;
@@ -456,6 +471,7 @@ impl Sim {
             founder,
             raider: false,
             target_town: None,
+            role: self.families[family].role,
         });
         self.families[family].members += 1;
     }
@@ -677,7 +693,7 @@ impl Sim {
     }
 
     fn gather_action(&self, a: &Agent, force: Option<ResourceKind>) -> (Action, ResourceKind) {
-        let kind = force.unwrap_or_else(|| self.most_needed(a.home));
+        let kind = force.unwrap_or_else(|| self.role_kind(a));
         let d = match kind {
             ResourceKind::Food => self.food_target(a.x, a.y),
             ResourceKind::Water => self.water_target(a.x, a.y),
@@ -686,8 +702,52 @@ impl Sim {
         if let Some((fx, fy)) = d {
             let (nx, ny) = self.steer(a, fx, fy);
             (Action::Move(nx, ny), kind)
+        } else if force.is_none() {
+            let mn = self.most_needed(a.home);
+            if mn != kind {
+                self.gather_action(a, Some(mn))
+            } else {
+                let others: [ResourceKind; 2] = match kind {
+                    ResourceKind::Food => [ResourceKind::Water, ResourceKind::Ore],
+                    ResourceKind::Water => [ResourceKind::Food, ResourceKind::Ore],
+                    ResourceKind::Ore => [ResourceKind::Food, ResourceKind::Water],
+                };
+                for k in others {
+                    let d = match k {
+                        ResourceKind::Food => self.food_target(a.x, a.y),
+                        ResourceKind::Water => self.water_target(a.x, a.y),
+                        ResourceKind::Ore => self.ore_target(a.x, a.y),
+                    };
+                    if let Some((fx, fy)) = d {
+                        let (nx, ny) = self.steer(a, fx, fy);
+                        return (Action::Move(nx, ny), k);
+                    }
+                }
+                (self.wander(a), kind)
+            }
         } else {
             (self.wander(a), kind)
+        }
+    }
+
+    fn role_kind(&self, a: &Agent) -> ResourceKind {
+        let need = self.most_needed(a.home);
+        let st = &self.towns[a.home].stocks;
+        let (kind, ok) = match a.role {
+            Role::Worker => (need, true),
+            Role::Farmer => (
+                ResourceKind::Food,
+                st.food > 25.0 && st.water > 8.0 && st.ore > 8.0,
+            ),
+            Role::Miner => (
+                ResourceKind::Ore,
+                st.ore < 120.0 && st.water > 8.0 && st.food > 8.0,
+            ),
+        };
+        if ok && kind != need {
+            kind
+        } else {
+            need
         }
     }
 
@@ -1606,5 +1666,47 @@ mod tests {
         let cost_blessed = 100.0 - s.towns[1].stocks.food;
         assert!(cost_plain > 0.0 && cost_blessed > 0.0 && cost_blessed < cost_plain,
             "prosperity should cheapen birth (blessed {} < plain {})", cost_blessed, cost_plain);
+    }
+
+    #[test]
+    fn every_agent_inherits_family_role() {
+        let s = Sim::new(40);
+        assert!(!s.families.is_empty());
+        for a in s.agents.iter() {
+            assert_eq!(a.role, s.families[a.family].role, "agent role must match its family");
+        }
+        let roles: std::collections::HashSet<Role> = s.families.iter().map(|f| f.role).collect();
+        assert!(roles.len() >= 2, "founding families should cover multiple roles");
+    }
+
+    #[test]
+    fn farmer_prefers_food_and_miner_ore() {
+        let mut s = Sim::new(41);
+        prep_two_towns(&mut s);
+        let fi = s.agents.iter().position(|a| a.role == Role::Farmer).unwrap();
+        let mi = s.agents.iter().position(|a| a.role == Role::Miner).unwrap();
+        let (_, fw) = s.decide(&s.agents[fi]);
+        let (_, mw) = s.decide(&s.agents[mi]);
+        assert_eq!(fw, ResourceKind::Food, "farmer should want food");
+        assert_eq!(mw, ResourceKind::Ore, "miner should want ore");
+    }
+
+    #[test]
+    fn role_falls_back_when_source_empty() {
+        let mut s = Sim::new(42);
+        prep_two_towns(&mut s);
+        let mi = s.agents.iter().position(|a| a.role == Role::Miner).unwrap();
+        for c in s.grid.iter_mut() {
+            if c.terrain == Terrain::Hills {
+                c.ore = 0.0;
+            }
+        }
+        for _ in 0..20 {
+            let (_, w) = s.decide(&s.agents[mi]);
+            if w != ResourceKind::Ore {
+                return;
+            }
+        }
+        panic!("miner with no ore should eventually fall back to another need");
     }
 }
