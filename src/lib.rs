@@ -38,6 +38,7 @@ struct App {
     paused: bool,
     bless_mode: bool,
     pending_bless: Vec<(usize, usize)>,
+    effects: Vec<render::Fx>,
     btn_pause: Element,
     btn_bless: Element,
     speed_lbl: Element,
@@ -57,6 +58,11 @@ impl App {
             let mut sim = self.sim.borrow_mut();
             for (x, y) in pts {
                 sim.bless(x as i32, y as i32, BLESS_R);
+                self.effects.push(render::Fx {
+                    x: x as f64 * CELL + CELL / 2.0,
+                    y: y as f64 * CELL + CELL / 2.0,
+                    life: 26.0,
+                });
             }
             render::draw_terrain(&self.terrain_ctx, &sim);
         }
@@ -77,13 +83,20 @@ impl App {
             self.fps_frames = 0;
             self.fps_time = 0.0;
         }
+        for e in self.effects.iter_mut() {
+            e.life -= 1.0;
+        }
+        self.effects.retain(|e| e.life > 0.0);
+        let sim = self.sim.borrow();
         render::draw(
             &self.ctx,
             &self.terrain,
-            &self.sim.borrow(),
+            &sim,
+            sim.tick_count,
             self.paused,
             self.speed,
             self.fps,
+            &self.effects,
         );
     }
 
@@ -112,6 +125,7 @@ impl App {
 
     fn new_world(&mut self) {
         self.seed += 1;
+        self.effects.clear();
         let s = sim::Sim::new(self.seed);
         render::draw_terrain(&self.terrain_ctx, &s);
         self.sim = Rc::new(RefCell::new(s));
@@ -185,6 +199,7 @@ pub fn start() -> Result<(), JsValue> {
         paused: false,
         bless_mode: false,
         pending_bless: Vec::new(),
+        effects: Vec::new(),
         btn_pause: btn_pause.clone(),
         btn_bless: btn_bless.clone(),
         speed_lbl,

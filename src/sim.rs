@@ -35,6 +35,8 @@ pub struct Agent {
     pub home: usize,
     pub x: i32,
     pub y: i32,
+    pub dir_x: i32,
+    pub dir_y: i32,
     pub hunger: f32,
     pub energy: f32,
     pub carried: f32,
@@ -199,6 +201,8 @@ impl Sim {
                     home,
                     x,
                     y,
+                    dir_x: 0,
+                    dir_y: 0,
                     hunger: rfrac(&mut self.rng) * 20.0,
                     energy: 80.0 + rfrac(&mut self.rng) * 20.0,
                     carried: 0.0,
@@ -210,6 +214,8 @@ impl Sim {
             home,
             x: cx,
             y: cy,
+            dir_x: 0,
+            dir_y: 0,
             hunger: 10.0,
             energy: 90.0,
             carried: 0.0,
@@ -396,8 +402,11 @@ impl Sim {
                 if a.energy <= 0.0 {
                     return;
                 }
+                let (ox, oy) = (a.x, a.y);
                 a.x = nx;
                 a.y = ny;
+                a.dir_x = (nx - ox).clamp(-1, 1);
+                a.dir_y = (ny - oy).clamp(-1, 1);
                 a.energy -= 0.6;
                 let c = &self.grid[idx(nx, ny)];
                 if a.carried < CARRY_LIMIT && c.terrain == Terrain::Forest && c.food > 0.5 {
