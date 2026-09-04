@@ -32,6 +32,32 @@ const RAID_TARGET_POP: usize = 6;
 const WEATHER_PLAYER_TIME: f64 = 640.0;
 const IDEA_TIME: f64 = 1200.0;
 
+const ANIMAL_MAX: usize = 120;
+const ANIMAL_BREED_EVERY: u64 = 800;
+const DOMESTIC_MILK_COST_FOOD: f32 = 15.0;
+const DOMESTIC_MILK_COST_WATER: f32 = 8.0;
+const DOMESTIC_HERD_CAP: usize = 6;
+const WOLF_MIN_TOWN_DIST: f32 = 18.0;
+const WOLF_BITE_CHANCE: f32 = 0.08;
+const BOAR_TUSK_CHANCE: f32 = 0.05;
+const WOLF_TARGET_RADIUS: i32 = 12;
+const ANIMAL_MELEE_REACH: i32 = 2;
+
+const GOLD_MAX: f32 = 200.0;
+const TRADE_POST_COST: f32 = 40.0;
+const TRADE_TRICKLE: f32 = 0.03;
+const CARAVAN_EVERY: u64 = 900;
+const CARAVAN_CAPACITY: f32 = 10.0;
+const CARAVAN_MAX: usize = 16;
+const EXPORT_FOOD: f32 = 50.0;
+const EXPORT_WATER: f32 = 60.0;
+const EXPORT_ORE: f32 = 25.0;
+const EXPORT_MEAT: f32 = 15.0;
+const BUY_FOOD_AT: f32 = 12.0;
+const BUY_WATER_AT: f32 = 8.0;
+const BUY_ORE_AT: f32 = 5.0;
+const BUY_MEAT_AT: f32 = 6.0;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -53,6 +79,7 @@ pub enum Role {
     Worker,
     Farmer,
     Miner,
+    Hunter,
 }
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
@@ -77,12 +104,43 @@ pub enum ResourceKind {
     Food,
     Water,
     Ore,
+    Meat,
+    Gold,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Species {
+    Deer,
+    Boar,
+    Wolf,
+    Cow,
+}
+
+impl Species {
+    pub fn meat_yield(self) -> f32 {
+        match self {
+            Species::Deer => 2.5,
+            Species::Boar => 3.5,
+            Species::Wolf => 2.0,
+            Species::Cow => 4.0,
+        }
+    }
+
+    fn hp(self) -> f32 {
+        match self {
+            Species::Deer => 40.0,
+            Species::Boar => 75.0,
+            Species::Wolf => 55.0,
+            Species::Cow => 50.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum BuildingKind {
     House,
     Well,
+    TradePost,
 }
 
 impl BuildingKind {
@@ -90,7 +148,18 @@ impl BuildingKind {
         match self {
             BuildingKind::House => HOUSE_COST,
             BuildingKind::Well => WELL_COST,
+            BuildingKind::TradePost => TRADE_POST_COST,
         }
+    }
+}
+
+pub fn trade_price(k: ResourceKind) -> f32 {
+    match k {
+        ResourceKind::Food => 0.8,
+        ResourceKind::Water => 0.4,
+        ResourceKind::Ore => 1.5,
+        ResourceKind::Meat => 1.2,
+        ResourceKind::Gold => 0.0,
     }
 }
 
@@ -99,6 +168,8 @@ pub struct Stock {
     pub food: f32,
     pub water: f32,
     pub ore: f32,
+    pub meat: f32,
+    pub gold: f32,
 }
 
 #[derive(Clone)]
@@ -163,11 +234,29 @@ enum Action {
     Die,
 }
 
+pub struct Animal {
+    pub x: i32,
+    pub y: i32,
+    pub species: Species,
+    pub hp: f32,
+    pub home: Option<usize>,
+}
+
+pub struct Caravan {
+    pub home: usize,
+    pub target: usize,
+    pub x: i32,
+    pub y: i32,
+    pub goods: Vec<(ResourceKind, f32)>,
+}
+
 pub struct Sim {
     pub grid: Vec<Cell>,
     pub agents: Vec<Agent>,
     pub towns: Vec<Settlement>,
     pub families: Vec<Family>,
+    pub animals: Vec<Animal>,
+    pub caravans: Vec<Caravan>,
     pub tick_count: u64,
     pub weather: Weather,
     pub weather_left: f64,
@@ -202,6 +291,8 @@ impl Sim {
             agents: Vec::new(),
             towns: Vec::new(),
             families: Vec::new(),
+            animals: Vec::new(),
+            caravans: Vec::new(),
             tick_count: 0,
             weather: Weather::Clear,
             weather_left: 0.0,
@@ -209,6 +300,7 @@ impl Sim {
         };
         sim.ensure_hills();
         sim.spawn_world();
+        sim.spawn_animals();
         sim
     }
 
@@ -389,7 +481,7 @@ impl Sim {
             self.towns.push(Settlement {
                 x: cx,
                 y: cy,
-                stocks: Stock { food: 80.0, water: 40.0, ore: 40.0 },
+                stocks: Stock { food: 80.0, water: 40.0, ore: 40.0, meat: 15.0, gold: 0.0 },
                 r,
                 g,
                 b,
@@ -412,9 +504,10 @@ impl Sim {
                     name: Self::family_name(&mut self.rng),
                     extinct: false,
                     accent: Self::family_accent(k, r, g, b),
-                    role: match (base + k) % 3 {
+                    role: match (base + k) % 4 {
                         1 => Role::Farmer,
                         2 => Role::Miner,
+                        3 => Role::Hunter,
                         _ => Role::Worker,
                     },
                 });
@@ -474,6 +567,307 @@ impl Sim {
             role: self.families[family].role,
         });
         self.families[family].members += 1;
+    }
+
+    fn random_walkable(&mut self, min_town: f32, within: i32) -> Option<(i32, i32)> {
+        for _ in 0..120 {
+            let x = rnd(&mut self.rng) as i32 % W as i32;
+            let y = rnd(&mut self.rng) as i32 % H as i32;
+            if !in_bounds(x, y) || !self.grid[idx(x, y)].terrain.walkable() {
+                continue;
+            }
+            if within > 0 {
+                let dx = x - W as i32 / 2;
+                let dy = y - H as i32 / 2;
+                if dx.abs().max(dy.abs()) > within {
+                    continue;
+                }
+            }
+            let d = self
+                .towns
+                .iter()
+                .map(|t| ((x - t.x).pow(2) + (y - t.y).pow(2)) as f32)
+                .fold(f32::MAX, f32::min)
+                .sqrt();
+            if d < min_town {
+                continue;
+            }
+            return Some((x, y));
+        }
+        None
+    }
+
+    fn push_animal(&mut self, species: Species, x: i32, y: i32, home: Option<usize>) {
+        if self.animals.len() >= ANIMAL_MAX {
+            return;
+        }
+        self.animals.push(Animal {
+            x,
+            y,
+            species,
+            hp: species.hp() * (0.8 + rfrac(&mut self.rng) * 0.4),
+            home,
+        });
+    }
+
+    fn spawn_animals(&mut self) {
+        for _ in 0..24 {
+            if let Some((x, y)) = self.random_walkable(4.0, 0) {
+                let sp = if rfrac(&mut self.rng) < 0.55 { Species::Deer } else { Species::Boar };
+                self.push_animal(sp, x, y, None);
+            }
+        }
+        for _ in 0..5 {
+            if let Some((x, y)) = self.random_walkable(WOLF_MIN_TOWN_DIST, 0) {
+                self.push_animal(Species::Wolf, x, y, None);
+            }
+        }
+        for ti in 0..self.towns.len() {
+            let (tx, ty) = (self.towns[ti].x, self.towns[ti].y);
+            for k in 0..2 {
+                let dir = if k == 0 { -2 } else { 2 };
+                let x = (tx + dir).clamp(1, W as i32 - 2);
+                let y = ty;
+                if self.grid[idx(x, y)].terrain.walkable() {
+                    self.push_animal(Species::Cow, x, y, Some(ti));
+                }
+            }
+        }
+    }
+
+    fn is_domestic_cow(&self, an: &Animal) -> bool {
+        an.species == Species::Cow && an.home.is_some()
+    }
+
+    fn domestic_herd(&self, ti: usize) -> usize {
+        self.animals
+            .iter()
+            .filter(|a| self.is_domestic_cow(a) && a.home == Some(ti))
+            .count()
+    }
+
+    pub fn breed_domestic(&mut self, ti: usize) -> bool {
+        if ti >= self.towns.len() {
+            return false;
+        }
+        if self.domestic_herd(ti) >= DOMESTIC_HERD_CAP {
+            return false;
+        }
+        let (f, w, tx0, ty0) = {
+            let t = &self.towns[ti];
+            (t.stocks.food, t.stocks.water, t.x, t.y)
+        };
+        if f < 20.0 || w < 10.0 {
+            return false;
+        }
+        self.towns[ti].stocks.food -= 20.0;
+        self.towns[ti].stocks.water -= 10.0;
+        let (tx, ty) = (
+            tx0 + rnd(&mut self.rng) as i32 % 5 - 2,
+            ty0 + rnd(&mut self.rng) as i32 % 5 - 2,
+        );
+        let x = tx.clamp(1, W as i32 - 2);
+        let y = ty.clamp(1, H as i32 - 2);
+        self.push_animal(Species::Cow, x, y, Some(ti));
+        true
+    }
+
+    fn spawn_calf(&mut self, ti: usize) {
+        let t = &self.towns[ti];
+        let x = (t.x + rnd(&mut self.rng) as i32 % 7 - 3).clamp(1, W as i32 - 2);
+        let y = (t.y + rnd(&mut self.rng) as i32 % 7 - 3).clamp(1, H as i32 - 2);
+        self.push_animal(Species::Cow, x, y, Some(ti));
+    }
+
+    fn has_trade_post(&self, ti: usize) -> bool {
+        self.towns[ti].built.iter().any(|b| *b == BuildingKind::TradePost)
+    }
+
+    fn market_buy(&mut self) {
+        for ti in 0..self.towns.len() {
+            if !self.has_trade_post(ti) {
+                continue;
+            }
+            let (mut f, mut w, mut o, mut m, mut g) = {
+                let s = &self.towns[ti].stocks;
+                (s.food, s.water, s.ore, s.meat, s.gold)
+            };
+            if f < BUY_FOOD_AT && g >= trade_price(ResourceKind::Food) * 2.0 {
+                f += 2.0;
+                g -= trade_price(ResourceKind::Food) * 2.0;
+            }
+            if w < BUY_WATER_AT && g >= trade_price(ResourceKind::Water) * 2.0 {
+                w += 2.0;
+                g -= trade_price(ResourceKind::Water) * 2.0;
+            }
+            if o < BUY_ORE_AT && g >= trade_price(ResourceKind::Ore) {
+                o += 1.0;
+                g -= trade_price(ResourceKind::Ore);
+            }
+            if m < BUY_MEAT_AT && g >= trade_price(ResourceKind::Meat) {
+                m += 1.0;
+                g -= trade_price(ResourceKind::Meat);
+            }
+            let s = &mut self.towns[ti].stocks;
+            s.food = f;
+            s.water = w;
+            s.ore = o;
+            s.meat = m;
+            s.gold = g;
+        }
+    }
+
+    fn export_caravans(&mut self) {
+        if self.tick_count % CARAVAN_EVERY != 0 || self.caravans.len() >= CARAVAN_MAX {
+            return;
+        }
+        for ti in 0..self.towns.len() {
+            if self.caravans.len() >= CARAVAN_MAX {
+                break;
+            }
+            let (has_post, at_war, x, y) = {
+                let t = &self.towns[ti];
+                (
+                    t.built.iter().any(|b| *b == BuildingKind::TradePost),
+                    t.at_war,
+                    t.x,
+                    t.y,
+                )
+            };
+            if !has_post || at_war {
+                continue;
+            }
+            let (f, w, o, m) = {
+                let s = &self.towns[ti].stocks;
+                (s.food, s.water, s.ore, s.meat)
+            };
+            let mut goods: Vec<(ResourceKind, f32)> = Vec::new();
+            let mut left = CARAVAN_CAPACITY;
+            let mut take = |kind: ResourceKind, stock: f32, thr: f32| {
+                if left > 0.0 {
+                    let avail = stock - thr;
+                    if avail > 0.0 {
+                        let amt = avail.min(left);
+                        goods.push((kind, amt));
+                        left -= amt;
+                    }
+                }
+            };
+            take(ResourceKind::Food, f, EXPORT_FOOD);
+            take(ResourceKind::Ore, o, EXPORT_ORE);
+            take(ResourceKind::Meat, m, EXPORT_MEAT);
+            take(ResourceKind::Water, w, EXPORT_WATER);
+            if goods.is_empty() {
+                continue;
+            }
+            let st = &mut self.towns[ti].stocks;
+            for (k, q) in &goods {
+                match k {
+                    ResourceKind::Food => st.food -= q,
+                    ResourceKind::Ore => st.ore -= q,
+                    ResourceKind::Meat => st.meat -= q,
+                    ResourceKind::Water => st.water -= q,
+                    ResourceKind::Gold => {}
+                }
+            }
+            let mut best: Option<usize> = None;
+            let mut bd = i32::MAX;
+            for tj in 0..self.towns.len() {
+                if tj == ti {
+                    continue;
+                }
+                let (tx2, ty2) = (self.towns[tj].x, self.towns[tj].y);
+                let d = self.cheb(x, y, tx2, ty2);
+                let needy = goods.iter().any(|(k, _)| match k {
+                    ResourceKind::Food => self.towns[tj].stocks.food < BUY_FOOD_AT,
+                    ResourceKind::Water => self.towns[tj].stocks.water < BUY_WATER_AT,
+                    ResourceKind::Ore => self.towns[tj].stocks.ore < BUY_ORE_AT,
+                    ResourceKind::Meat => self.towns[tj].stocks.meat < BUY_MEAT_AT,
+                    ResourceKind::Gold => false,
+                });
+                if needy && d < bd {
+                    bd = d;
+                    best = Some(tj);
+                }
+            }
+            let target = match best {
+                Some(tj) => tj,
+                None => {
+                    let mut bb: Option<usize> = None;
+                    let mut bd2 = i32::MAX;
+                    for tj in 0..self.towns.len() {
+                        if tj == ti {
+                            continue;
+                        }
+                        let d = self.cheb(x, y, self.towns[tj].x, self.towns[tj].y);
+                        if d < bd2 {
+                            bd2 = d;
+                            bb = Some(tj);
+                        }
+                    }
+                    bb.unwrap_or(ti)
+                }
+            };
+            if target == ti {
+                continue;
+            }
+            self.caravans.push(Caravan { home: ti, target, x, y, goods });
+        }
+    }
+
+    fn caravans_step(&mut self) {
+        for i in 0..self.caravans.len() {
+            let (home, target, x, y) = {
+                let c = &self.caravans[i];
+                (c.home, c.target, c.x, c.y)
+            };
+            let (tx, ty) = (self.towns[target].x, self.towns[target].y);
+            if self.cheb(x, y, tx, ty) <= 1 {
+                let goods = std::mem::take(&mut self.caravans[i].goods);
+                let gold: f32 = goods.iter().map(|(k, q)| q * trade_price(*k)).sum();
+                let s = &mut self.towns[home].stocks;
+                s.gold = (s.gold + gold).min(GOLD_MAX);
+                let st = &mut self.towns[target].stocks;
+                for (k, q) in &goods {
+                    match k {
+                        ResourceKind::Food => st.food += q,
+                        ResourceKind::Water => st.water += q,
+                        ResourceKind::Ore => st.ore += q,
+                        ResourceKind::Meat => st.meat += q,
+                        ResourceKind::Gold => {}
+                    }
+                }
+            } else {
+                let (nx, ny) = self.caravan_step(x, y, tx, ty);
+                self.caravans[i].x = nx;
+                self.caravans[i].y = ny;
+            }
+        }
+        self.caravans.retain(|c| !c.goods.is_empty());
+    }
+
+    fn caravan_step(&self, x: i32, y: i32, tx: i32, ty: i32) -> (i32, i32) {
+        let mut best = (x, y);
+        let mut bs = i32::MIN;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let nx = x + dx;
+                let ny = y + dy;
+                if !in_bounds(nx, ny) || !self.grid[idx(nx, ny)].terrain.walkable() {
+                    continue;
+                }
+                let d = (nx - tx).pow(2) + (ny - ty).pow(2);
+                let j = (self.brain(nx, ny, self.tick_count) % 7) as i32 - 3;
+                if -d + j > bs {
+                    bs = -d + j;
+                    best = (nx, ny);
+                }
+            }
+        }
+        best
     }
 
     pub fn pop(&self, ti: usize) -> usize {
@@ -580,6 +974,10 @@ impl Sim {
             if wells > 0 {
                 t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32).min(200.0);
             }
+            let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
+            if posts > 0 {
+                t.stocks.gold = (t.stocks.gold + TRADE_TRICKLE * posts as f32).min(GOLD_MAX);
+            }
             if self.weather == Weather::Heat {
                 t.stocks.water = (t.stocks.water - 0.08).max(0.0);
             }
@@ -592,6 +990,10 @@ impl Sim {
         }
 
         self.construction();
+        self.animals_step();
+        self.caravans_step();
+        self.market_buy();
+        self.export_caravans();
 
         let actions: Vec<(Action, ResourceKind)> = self.agents.iter().map(|a| self.decide(a)).collect();
         let mut dead = Vec::new();
@@ -627,6 +1029,296 @@ impl Sim {
             Weather::Frost
         };
         self.weather_left = 300.0 + rfrac(&mut self.rng) as f64 * 400.0;
+    }
+
+    fn animals_step(&mut self) {
+        let mut dead: Vec<usize> = Vec::new();
+        for i in 0..self.animals.len() {
+            let (spec, x, y, home) = {
+                let a = &self.animals[i];
+                (a.species, a.x, a.y, a.home)
+            };
+            match spec {
+                Species::Deer => {
+                    if self.nearest_agent(x, y, 5).is_some() {
+                        let (nx, ny) = self.flee_from_agents(x, y);
+                        self.animals[i].x = nx;
+                        self.animals[i].y = ny;
+                    } else if let Some((wx, wy)) = self.nearest_animal_of(x, y, 6, Species::Wolf, None) {
+                        let (nx, ny) = self.animal_step(x, y, wx, wy, true);
+                        self.animals[i].x = nx;
+                        self.animals[i].y = ny;
+                    } else {
+                        let (nx, ny) = self.animal_wander(x, y, i);
+                        self.animals[i].x = nx;
+                        self.animals[i].y = ny;
+                    }
+                }
+                Species::Boar => {
+                    if let Some((ax, ay)) = self.nearest_agent(x, y, 3) {
+                        if self.cheb(ax, ay, x, y) <= 1 && rfrac(&mut self.rng) < BOAR_TUSK_CHANCE {
+                            self.bite_agent(ax, ay);
+                        }
+                        let (nx, ny) = self.animal_step(x, y, ax, ay, true);
+                        self.animals[i].x = nx;
+                        self.animals[i].y = ny;
+                    } else {
+                        let (nx, ny) = self.animal_wander(x, y, i);
+                        self.animals[i].x = nx;
+                        self.animals[i].y = ny;
+                    }
+                }
+                Species::Wolf => {
+                    let prey_i = self.nearest_wild_prey_i(x, y, WOLF_TARGET_RADIUS);
+                    if let Some(p) = prey_i {
+                        let (px, py) = (self.animals[p].x, self.animals[p].y);
+                        if self.cheb(x, y, px, py) <= 1 && rfrac(&mut self.rng) < 0.3 {
+                            dead.push(p);
+                        } else {
+                            let (nx, ny) = self.animal_step(x, y, px, py, false);
+                            self.animals[i].x = nx;
+                            self.animals[i].y = ny;
+                        }
+                    } else if let Some(ci) = self.nearest_cow_i(x, y, 8) {
+                        let (cx, cy) = (self.animals[ci].x, self.animals[ci].y);
+                        let human = self.nearest_agent_dist(x, y, 9);
+                        let go_cow = match human {
+                            Some((_, _, hd)) => {
+                                self.cheb(cx, cy, x, y) < hd || rfrac(&mut self.rng) < 0.75
+                            }
+                            None => true,
+                        };
+                        if go_cow {
+                            if self.cheb(x, y, cx, cy) <= 1 {
+                                if rfrac(&mut self.rng) < 0.25 {
+                                    self.animals[ci].hp -= Species::Cow.hp() * 0.4;
+                                    if self.animals[ci].hp <= 0.0 {
+                                        dead.push(ci);
+                                    }
+                                }
+                            } else {
+                                let (nx, ny) = self.animal_step(x, y, cx, cy, false);
+                                self.animals[i].x = nx;
+                                self.animals[i].y = ny;
+                            }
+                        }
+                    } else if let Some((hx, hy)) = self.nearest_agent(x, y, 9) {
+                        if self.cheb(x, y, hx, hy) <= 2 && rfrac(&mut self.rng) < WOLF_BITE_CHANCE {
+                            self.bite_agent(hx, hy);
+                        } else {
+                            let (nx, ny) = self.animal_step(x, y, hx, hy, false);
+                            self.animals[i].x = nx;
+                            self.animals[i].y = ny;
+                        }
+                    } else {
+                        let (nx, ny) = self.animal_wander(x, y, i);
+                        self.animals[i].x = nx;
+                        self.animals[i].y = ny;
+                    }
+                }
+                Species::Cow => {
+                    let (nx, ny) = if let Some(ti) = home {
+                        let town = &self.towns[ti];
+                        if self.cheb(x, y, town.x, town.y) > 3 {
+                            self.animal_step(x, y, town.x, town.y, false)
+                        } else {
+                            self.animal_wander(x, y, i)
+                        }
+                    } else {
+                        self.animal_wander(x, y, i)
+                    };
+                    self.animals[i].x = nx;
+                    self.animals[i].y = ny;
+                }
+            }
+        }
+        dead.sort();
+        dead.dedup();
+        for &i in dead.iter().rev() {
+            self.animals.remove(i);
+        }
+
+        if self.tick_count % ANIMAL_BREED_EVERY == 0 {
+            let mut deer = 0;
+            let mut boar = 0;
+            let mut wolves = 0;
+            for a in &self.animals {
+                match a.species {
+                    Species::Deer => deer += 1,
+                    Species::Boar => boar += 1,
+                    Species::Wolf => wolves += 1,
+                    Species::Cow => {}
+                }
+            }
+            if deer < 24 {
+                if let Some((x, y)) = self.random_walkable(4.0, 0) {
+                    self.push_animal(Species::Deer, x, y, None);
+                }
+            }
+            if boar < 10 {
+                if let Some((x, y)) = self.random_walkable(4.0, 0) {
+                    self.push_animal(Species::Boar, x, y, None);
+                }
+            }
+            if wolves < 4 {
+                if let Some((x, y)) = self.random_walkable(WOLF_MIN_TOWN_DIST, 0) {
+                    self.push_animal(Species::Wolf, x, y, None);
+                }
+            }
+            for ti in 0..self.towns.len() {
+                let herd = self.domestic_herd(ti);
+                if herd >= 2 && herd <= DOMESTIC_HERD_CAP {
+                    let (f, w) = {
+                        let t = &self.towns[ti];
+                        (t.stocks.food, t.stocks.water)
+                    };
+                    if f >= DOMESTIC_MILK_COST_FOOD && w >= DOMESTIC_MILK_COST_WATER {
+                        self.towns[ti].stocks.food -= DOMESTIC_MILK_COST_FOOD;
+                        self.towns[ti].stocks.water -= DOMESTIC_MILK_COST_WATER;
+                        self.spawn_calf(ti);
+                    }
+                }
+            }
+        }
+    }
+
+    fn flee_from_agents(&self, x: i32, y: i32) -> (i32, i32) {
+        let ax = (self.agents.iter().map(|a| a.x).sum::<i32>() as f32 / self.agents.len().max(1) as f32) as i32;
+        let ay = (self.agents.iter().map(|a| a.y).sum::<i32>() as f32 / self.agents.len().max(1) as f32) as i32;
+        self.animal_step(x, y, ax, ay, true)
+    }
+
+    fn cheb(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
+        (x1 - x2).abs().max(y1 - y2)
+    }
+
+    fn nearest_agent(&self, x: i32, y: i32, max_d: i32) -> Option<(i32, i32)> {
+        let mut best = None;
+        let mut bd = max_d;
+        for a in &self.agents {
+            let d = self.cheb(a.x, a.y, x, y);
+            if d <= bd {
+                bd = d;
+                best = Some((a.x, a.y));
+            }
+        }
+        best
+    }
+
+    fn nearest_agent_dist(&self, x: i32, y: i32, max_d: i32) -> Option<(i32, i32, i32)> {
+        self.nearest_agent(x, y, max_d).map(|(ax, ay)| (ax, ay, self.cheb(ax, ay, x, y)))
+    }
+
+    fn nearest_animal_of(
+        &self,
+        x: i32,
+        y: i32,
+        max_d: i32,
+        spec: Species,
+        home: Option<usize>,
+    ) -> Option<(i32, i32)> {
+        let mut best = None;
+        let mut bd = max_d;
+        for a in &self.animals {
+            if a.species != spec || a.home != home {
+                continue;
+            }
+            let d = self.cheb(a.x, a.y, x, y);
+            if d <= bd {
+                bd = d;
+                best = Some((a.x, a.y));
+            }
+        }
+        best
+    }
+
+    fn nearest_wild_prey_i(&self, x: i32, y: i32, max_d: i32) -> Option<usize> {
+        let mut best = None;
+        let mut bd = max_d;
+        for (i, a) in self.animals.iter().enumerate() {
+            if a.species != Species::Deer && a.species != Species::Boar {
+                continue;
+            }
+            let d = self.cheb(a.x, a.y, x, y);
+            if d <= bd {
+                bd = d;
+                best = Some(i);
+            }
+        }
+        best
+    }
+
+    fn nearest_cow_i(&self, x: i32, y: i32, max_d: i32) -> Option<usize> {
+        let mut best = None;
+        let mut bd = max_d;
+        for (i, a) in self.animals.iter().enumerate() {
+            if a.species != Species::Cow || a.home.is_none() {
+                continue;
+            }
+            let d = self.cheb(a.x, a.y, x, y);
+            if d <= bd {
+                bd = d;
+                best = Some(i);
+            }
+        }
+        best
+    }
+
+    fn bite_agent(&mut self, ax: i32, ay: i32) {
+        for a in self.agents.iter_mut() {
+            if (a.x - ax).abs().max(a.y - ay) <= 1 {
+                a.hunger = (a.hunger + 45.0).min(140.0);
+            }
+        }
+    }
+
+    fn brain(&self, x: i32, y: i32, k: u64) -> u32 {
+        (x as u32).wrapping_mul(0x45d9_f3b) ^ (y as u32).wrapping_mul(0x119d_e1f3) ^ (k as u32).wrapping_mul(0xabcd_ef01)
+    }
+
+    fn animal_step(&self, x: i32, y: i32, tx: i32, ty: i32, flee: bool) -> (i32, i32) {
+        let mut best = (x, y);
+        let mut bs = i32::MIN;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let nx = x + dx;
+                let ny = y + dy;
+                if !in_bounds(nx, ny) || !self.grid[idx(nx, ny)].terrain.walkable() {
+                    continue;
+                }
+                let d2 = (nx - tx).pow(2) + (ny - ty).pow(2);
+                let sc = if flee { d2 } else { -d2 };
+                let j = (self.brain(nx, ny, self.tick_count) % 7) as i32 - 3;
+                if sc + j > bs {
+                    bs = sc + j;
+                    best = (nx, ny);
+                }
+            }
+        }
+        best
+    }
+
+    fn animal_wander(&self, x: i32, y: i32, i: usize) -> (i32, i32) {
+        for k in 0..8u32 {
+            let h = (x as u32).wrapping_mul(0x21f0_aaad)
+                ^ (y as u32 & 1).wrapping_mul(k + 1)
+                ^ (self.tick_count as u32).wrapping_mul(0x0100_0101)
+                ^ self.brain(x, y, i as u64);
+            let dx = (h % 3) as i32 - 1;
+            let dy = ((h >> 2) % 3) as i32 - 1;
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let nx = x + dx;
+            let ny = y + dy;
+            if in_bounds(nx, ny) && self.grid[idx(nx, ny)].terrain.walkable() {
+                return (nx, ny);
+            }
+        }
+        (x, y)
     }
 
     pub fn cycle_weather(&mut self) {
@@ -673,7 +1365,9 @@ impl Sim {
             }
         } else if at_home {
             if a.hunger >= HUNGRY_AT {
-                if self.towns[a.home].stocks.food > 0.0 {
+                let food = self.towns[a.home].stocks.food;
+                let meat = self.towns[a.home].stocks.meat;
+                if food > 0.0 || meat > 0.0 {
                     (Action::Eat, a.want)
                 } else {
                     self.gather_action(a, Some(ResourceKind::Food))
@@ -690,7 +1384,8 @@ impl Sim {
                 self.gather_action(a, None)
             }
         } else {
-            let hungry = a.hunger >= HUNGRY_AT && self.towns[a.home].stocks.food > 0.0;
+            let hungry = a.hunger >= HUNGRY_AT
+                && (self.towns[a.home].stocks.food > 0.0 || self.towns[a.home].stocks.meat > 0.0);
             let thirsty = a.thirst >= THIRSTY_AT && self.towns[a.home].stocks.water > 0.0;
             if hungry || thirsty {
                 let (nx, ny) = self.steer(a, hx, hy);
@@ -707,6 +1402,8 @@ impl Sim {
             ResourceKind::Food => self.food_target(a.x, a.y),
             ResourceKind::Water => self.water_target(a.x, a.y),
             ResourceKind::Ore => self.ore_target(a.x, a.y),
+            ResourceKind::Meat => self.meat_target(a.x, a.y),
+            ResourceKind::Gold => None,
         };
         if let Some((fx, fy)) = d {
             let (nx, ny) = self.steer(a, fx, fy);
@@ -719,13 +1416,17 @@ impl Sim {
                 let others: [ResourceKind; 2] = match kind {
                     ResourceKind::Food => [ResourceKind::Water, ResourceKind::Ore],
                     ResourceKind::Water => [ResourceKind::Food, ResourceKind::Ore],
-                    ResourceKind::Ore => [ResourceKind::Food, ResourceKind::Water],
+                    ResourceKind::Ore => [ResourceKind::Food, ResourceKind::Meat],
+                    ResourceKind::Meat => [ResourceKind::Food, ResourceKind::Water],
+                    ResourceKind::Gold => [ResourceKind::Food, ResourceKind::Water],
                 };
                 for k in others {
                     let d = match k {
                         ResourceKind::Food => self.food_target(a.x, a.y),
                         ResourceKind::Water => self.water_target(a.x, a.y),
                         ResourceKind::Ore => self.ore_target(a.x, a.y),
+                        ResourceKind::Meat => self.meat_target(a.x, a.y),
+                        ResourceKind::Gold => None,
                     };
                     if let Some((fx, fy)) = d {
                         let (nx, ny) = self.steer(a, fx, fy);
@@ -752,6 +1453,10 @@ impl Sim {
                 ResourceKind::Ore,
                 st.ore < 120.0 && st.water > 8.0 && st.food > 8.0,
             ),
+            Role::Hunter => (
+                ResourceKind::Meat,
+                st.meat < 15.0 && st.water > 8.0 && st.food > 8.0,
+            ),
         };
         if ok && kind != need {
             kind
@@ -765,8 +1470,11 @@ impl Sim {
         let f = s.food / BIRTH_MIN_FOOD;
         let w = s.water / BIRTH_MIN_WATER;
         let o = s.ore / 15.0;
-        if w < f && w <= o {
+        let m = s.meat / 12.0;
+        if w < f && w <= o && w <= m {
             ResourceKind::Water
+        } else if m < f && m <= o {
+            ResourceKind::Meat
         } else if o < f {
             ResourceKind::Ore
         } else {
@@ -813,6 +1521,22 @@ impl Sim {
             let c = &s.grid[idx(nx, ny)];
             c.terrain == Terrain::Hills && c.ore > 0.5
         })
+    }
+
+    fn meat_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
+        let mut best = None;
+        let mut bd = SEEK_RADIUS;
+        for a in &self.animals {
+            if a.home.is_some() && a.species == Species::Cow {
+                continue;
+            }
+            let d = self.cheb(x, y, a.x, a.y);
+            if d <= bd {
+                bd = d;
+                best = Some((a.x, a.y));
+            }
+        }
+        best
     }
 
     fn is_water_adj(&self, x: i32, y: i32) -> bool {
@@ -884,6 +1608,45 @@ impl Sim {
         (h % 7) as i32 - 3
     }
 
+    fn hunt_melee(&mut self, i: usize) {
+        if self.agents[i].carry.is_some() {
+            return;
+        }
+        let (ax, ay) = {
+            let a = &self.agents[i];
+            (a.x, a.y)
+        };
+        let mut best = None;
+        let mut bd = ANIMAL_MELEE_REACH;
+        for (k, an) in self.animals.iter().enumerate() {
+            if an.home.is_some() && an.species == Species::Cow {
+                continue;
+            }
+            let d = self.cheb(ax, ay, an.x, an.y);
+            if d <= bd {
+                bd = d;
+                best = Some(k);
+            }
+        }
+        let Some(k) = best else { return };
+        let dmg = 22.0 + rfrac(&mut self.rng) * 16.0;
+        self.animals[k].hp -= dmg;
+        if self.animals[k].hp <= 0.0 {
+            let qty = self.animals[k].species.meat_yield();
+            self.animals.remove(k);
+            self.agents[i].carry = Some((ResourceKind::Meat, qty));
+        } else {
+            let retal = match self.animals[k].species {
+                Species::Wolf => 0.3,
+                Species::Boar => 0.2,
+                _ => 0.0,
+            };
+            if retal > 0.0 && rfrac(&mut self.rng) < retal {
+                self.bite_agent(ax, ay);
+            }
+        }
+    }
+
     fn apply(&mut self, i: usize, act: Action, dead: &mut Vec<usize>) {
         match act {
             Action::Move(nx, ny) => {
@@ -930,8 +1693,13 @@ impl Sim {
                                     a.carry = Some((ResourceKind::Ore, 1.0));
                                 }
                             }
+                            ResourceKind::Meat => {}
+                            ResourceKind::Gold => {}
                         }
                     }
+                }
+                if self.agents[i].carry.is_none() && self.agents[i].want == ResourceKind::Meat && !self.agents[i].raider {
+                    self.hunt_melee(i);
                 }
                 if self.agents[i].raider {
                     self.combat_check(i);
@@ -943,8 +1711,15 @@ impl Sim {
             }
             Action::Eat => {
                 let ti = self.agents[i].home;
+                let mut ate = false;
                 if self.towns[ti].stocks.food > 0.0 {
                     self.towns[ti].stocks.food -= 2.0;
+                    ate = true;
+                } else if self.towns[ti].stocks.meat > 0.0 {
+                    self.towns[ti].stocks.meat -= 2.0;
+                    ate = true;
+                }
+                if ate {
                     let a = &mut self.agents[i];
                     a.hunger = (a.hunger - 30.0).max(0.0);
                     a.energy = (a.energy + 4.0).min(100.0);
@@ -968,6 +1743,8 @@ impl Sim {
                         ResourceKind::Food => st.food += qty,
                         ResourceKind::Water => st.water += qty,
                         ResourceKind::Ore => st.ore += qty,
+                        ResourceKind::Meat => st.meat += qty,
+                        ResourceKind::Gold => {}
                     }
                 }
                 a.hunger = (a.hunger - 5.0).max(0.0);
@@ -1444,9 +2221,11 @@ mod tests {
     #[test]
     fn well_regenerates_water() {
         let mut s = Sim::new(17);
+        s.agents.retain(|a| a.home != 0);
         s.towns[0].stocks.food = 100.0;
         s.towns[0].stocks.water = 100.0;
         s.towns[0].stocks.ore = 400.0;
+        s.towns[0].stocks.meat = 30.0;
         s.build_request(0, BuildingKind::Well);
         let w0 = s.towns[0].stocks.water;
         for _ in 0..WELL_COST as usize + 50 {
@@ -1668,8 +2447,8 @@ mod tests {
         s.towns[1].idea = TownIdea::Prosperity;
         s.towns[0].cap = 60;
         s.towns[1].cap = 60;
-        s.towns[0].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0 };
-        s.towns[1].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0 };
+        s.towns[0].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0, meat: 40.0, gold: 0.0 };
+        s.towns[1].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0, meat: 40.0, gold: 0.0 };
         s.reproduction();
         let cost_plain = 100.0 - s.towns[0].stocks.food;
         let cost_blessed = 100.0 - s.towns[1].stocks.food;
@@ -1762,5 +2541,266 @@ mod tests {
             }
         }
         panic!("miner with no ore should eventually fall back to another need");
+    }
+
+    #[test]
+    fn world_spawns_animals_on_walkable_land() {
+        for seed in 1..=4u64 {
+            let s = Sim::new(seed);
+            assert!(!s.animals.is_empty(), "seed {}: world should have animals", seed);
+            assert!(s.animals.len() <= ANIMAL_MAX);
+            for a in &s.animals {
+                assert!(a.x >= 0 && a.x < W as i32 && a.y >= 0 && a.y < H as i32);
+                assert!(s.grid[idx(a.x, a.y)].terrain.walkable());
+            }
+            let wolves = s.animals.iter().filter(|a| a.species == Species::Wolf).count();
+            assert!(wolves >= 1, "seed {}: should have wolves", seed);
+        }
+    }
+
+    #[test]
+    fn animals_stay_walkable_in_bounds() {
+        let mut s = Sim::new(50);
+        for _ in 0..600 {
+            s.tick();
+            for a in &s.animals {
+                assert!(in_bounds(a.x, a.y));
+                assert!(s.grid[idx(a.x, a.y)].terrain.walkable());
+                assert!(a.hp > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn hunter_strikes_animals_and_gets_meat() {
+        let mut s = Sim::new(51);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.agents.clear();
+        let fam = s.families.iter().position(|f| f.role == Role::Hunter).unwrap();
+        s.spawn_agent(0, tx, ty, fam, false);
+        let ai = 0;
+        s.agents[ai].x = tx;
+        s.agents[ai].y = ty + 2;
+        s.push_animal(Species::Deer, tx + 1, ty + 2, None);
+        s.agents[ai].want = ResourceKind::Meat;
+        let animals_before = s.animals.len();
+        for _ in 0..3 {
+            s.hunt_melee(ai);
+            if s.agents[ai].carry.is_some() {
+                break;
+            }
+        }
+        assert!(
+            s.animals.len() < animals_before,
+            "hunting should kill the deer"
+        );
+        assert_eq!(s.agents[ai].carry.map(|(k, _)| k), Some(ResourceKind::Meat));
+    }
+
+    #[test]
+    fn hunting_fills_town_meat_stock() {
+        let mut s = Sim::new(52);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.agents.retain(|a| a.home != 0);
+        s.towns[0].stocks = Stock { food: 200.0, water: 100.0, ore: 50.0, meat: 0.0, gold: 0.0 };
+        s.families[0].role = Role::Hunter;
+        s.families[1].role = Role::Hunter;
+        for k in 0..6 {
+            s.spawn_agent(0, tx, ty, k % 2, false);
+        }
+        for k in 0..8 {
+            let dx = 4 + (k / 3) as i32;
+            let dy = 4 + (k % 3) as i32;
+            s.push_animal(Species::Deer, tx + dx, ty + dy, None);
+        }
+        let mut done = false;
+        for _ in 0..4000 {
+            s.tick();
+            if s.towns[0].stocks.meat > 2.0 {
+                done = true;
+                break;
+            }
+        }
+        assert!(done, "hunters should stockpile meat when animals are near");
+    }
+
+    #[test]
+    fn wolf_bite_hurts_agents() {
+        let mut s = Sim::new(53);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.agents[0].x = tx + 1;
+        s.agents[0].y = ty + 1;
+        let before = s.agents[0].hunger;
+        for _ in 0..3 {
+            s.bite_agent(s.agents[0].x, s.agents[0].y);
+        }
+        assert!(s.agents[0].hunger > before + 100.0, "wolf bites should stack");
+        assert!(s.agents[0].hunger >= 140.0, "bites should be lethal");
+    }
+
+    #[test]
+    fn wolf_stalks_agents() {
+        let mut s = Sim::new(54);
+        s.animals.clear();
+        s.agents.clear();
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.agents.retain(|_| false);
+        let fam = 0;
+        s.spawn_agent(0, tx, ty, fam, true);
+        let ax = s.agents[0].x;
+        let ay = s.agents[0].y;
+        s.push_animal(Species::Wolf, ax + 8, ay, None);
+        let before = s.cheb(s.animals[0].x, s.animals[0].y, ax, ay);
+        let mut saw_bite = false;
+        for _ in 0..15 {
+            s.animals_step();
+            if s.agents.iter().any(|a| a.hunger >= 140.0) {
+                saw_bite = true;
+                break;
+            }
+        }
+        let after = s.cheb(s.animals[0].x, s.animals[0].y, ax, ay);
+        assert!(
+            after < before || saw_bite,
+            "wolf should close in on people (b{}->a{})",
+            before,
+            after
+        );
+    }
+
+    #[test]
+    fn cows_breed_with_food_and_water() {
+        let mut s = Sim::new(55);
+        s.animals.clear();
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.push_animal(Species::Cow, tx, ty, Some(0));
+        s.push_animal(Species::Cow, tx + 1, ty, Some(0));
+        s.towns[0].stocks.food = 200.0;
+        s.towns[0].stocks.water = 100.0;
+        s.tick_count = ANIMAL_BREED_EVERY;
+        s.animals_step();
+        let herd = s.domestic_herd(0);
+        assert!(herd >= 3, "herd should grow when fed (herd after: {})", herd);
+        assert!(s.towns[0].stocks.food < 200.0, "breeding should consume food");
+    }
+
+    #[test]
+    fn breed_domestic_player_action() {
+        let mut s = Sim::new(56);
+        s.towns[0].stocks.food = 5.0;
+        s.towns[0].stocks.water = 5.0;
+        let n0 = s.domestic_herd(0);
+        assert!(!s.breed_domestic(0), "cannot breed without food");
+        s.towns[0].stocks.food = 100.0;
+        s.towns[0].stocks.water = 50.0;
+        assert!(s.breed_domestic(0), "breeding should succeed with stocks");
+        assert_eq!(s.domestic_herd(0), n0 + 1);
+    }
+
+    #[test]
+    fn eat_falls_back_to_meat_when_no_food() {
+        let mut s = Sim::new(57);
+        prep_two_towns(&mut s);
+        s.towns[0].stocks.food = 0.0;
+        s.towns[0].stocks.meat = 20.0;
+        let idx = s.agents.iter().position(|a| a.home == 0).unwrap();
+        s.agents[idx].x = s.towns[0].x;
+        s.agents[idx].y = s.towns[0].y;
+        s.agents[idx].hunger = 90.0;
+        let (act, _) = s.decide(&s.agents[idx]);
+        assert!(matches!(act, Action::Eat));
+        s.agents[idx].hunger = 90.0;
+        s.apply(idx, Action::Eat, &mut Vec::new());
+        assert!(s.towns[0].stocks.meat < 20.0);
+        assert!(s.agents[idx].hunger < 90.0);
+    }
+
+    #[test]
+    fn hunter_prefers_meat() {
+        let mut s = Sim::new(58);
+        prep_two_towns(&mut s);
+        let hi = s.agents.iter().position(|a| a.role == Role::Hunter).unwrap();
+        s.towns[s.agents[hi].home].stocks.meat = 0.0;
+        s.towns[s.agents[hi].home].stocks.food = 100.0;
+        s.towns[s.agents[hi].home].stocks.water = 50.0;
+        let (_, w) = s.decide(&s.agents[hi]);
+        assert_eq!(w, ResourceKind::Meat, "hunter should want meat");
+    }
+
+    #[test]
+    fn animals_are_deterministic() {
+        let mut a = Sim::new(7);
+        let mut b = Sim::new(7);
+        for _ in 0..300 {
+            a.tick();
+            b.tick();
+        }
+        assert_eq!(a.animals.len(), b.animals.len());
+        for (x, y) in a.animals.iter().zip(b.animals.iter()) {
+            assert_eq!(x.x, y.x);
+            assert_eq!(x.y, y.y);
+            assert_eq!(x.species, y.species);
+            assert_eq!(x.hp.to_bits(), y.hp.to_bits());
+        }
+    }
+
+    #[test]
+    fn trade_post_accrues_gold() {
+        let mut s = Sim::new(60);
+        s.towns[0].built = vec![BuildingKind::TradePost];
+        let g0 = s.towns[0].stocks.gold;
+        for _ in 0..100 {
+            s.tick();
+        }
+        assert!(
+            s.towns[0].stocks.gold > g0,
+            "trade post should earn trickle gold ({} -> {})",
+            g0,
+            s.towns[0].stocks.gold
+        );
+    }
+
+    #[test]
+    fn caravan_carries_goods_and_returns_gold() {
+        let mut s = Sim::new(61);
+        prep_two_towns(&mut s);
+        for t in 0..2 {
+            s.towns[t].built = vec![BuildingKind::TradePost];
+        }
+        s.towns[0].stocks.food = 200.0;
+        s.towns[0].stocks.ore = 100.0;
+        s.towns[0].stocks.meat = 50.0;
+        s.towns[0].stocks.water = 150.0;
+        s.towns[1].stocks.food = 2.0;
+        s.towns[1].stocks.water = 3.0;
+        let g_start = s.towns[0].stocks.gold;
+        for _ in 0..12000 {
+            s.tick();
+            if s.towns[0].stocks.gold > g_start + 15.0 {
+                return;
+            }
+        }
+        panic!("no caravan trade happened (gold {} from {})", s.towns[0].stocks.gold, g_start);
+    }
+
+    #[test]
+    fn market_buys_needed_goods_with_gold() {
+        let mut s = Sim::new(62);
+        s.towns[0].built = vec![BuildingKind::TradePost];
+        s.towns[0].stocks.gold = 200.0;
+        s.towns[0].stocks.food = 2.0;
+        s.towns[0].stocks.water = 200.0;
+        let f0 = s.towns[0].stocks.food;
+        s.market_buy();
+        assert!(
+            s.towns[0].stocks.food > f0,
+            "market should buy food when low ({} -> {})",
+            f0,
+            s.towns[0].stocks.food
+        );
+        assert!(
+            s.towns[0].stocks.gold < 200.0,
+            "buying should spend gold"
+        );
     }
 }

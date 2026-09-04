@@ -1,4 +1,4 @@
-use crate::sim::{Role, Terrain, TownIdea, Weather, H, Sim, W};
+use crate::sim::{Role, Species, Terrain, TownIdea, Weather, H, Sim, W};
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
@@ -222,7 +222,30 @@ fn draw_building(
             ctx.set_fill_style_str("rgb(70,70,76)");
             ctx.fill_rect(px + 2.0, py + 1.0, 2.0, 2.0);
         }
+        crate::sim::BuildingKind::TradePost => {
+            ctx.set_fill_style_str("rgb(232,214,120)");
+            ctx.fill_rect(px, py, 6.0, 1.0);
+            ctx.set_fill_style_str("rgb(150,120,70)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 3.0);
+            ctx.set_fill_style_str("rgb(232,214,120)");
+            ctx.fill_rect(px, py + 3.0, 6.0, 1.0);
+            ctx.set_fill_style_str("rgb(92,74,44)");
+            ctx.fill_rect(px + 1.0, py + 2.0, 4.0, 2.0);
+        }
     }
+}
+
+fn draw_caravan(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64) {
+    ctx.set_fill_style_str("rgba(0,0,0,0.15)");
+    ctx.fill_rect(cx, cy + 4.0, 7.0, 1.0);
+    ctx.set_fill_style_str("rgb(150,120,70)");
+    ctx.fill_rect(cx, cy + 2.0, 7.0, 2.0);
+    ctx.set_fill_style_str("rgb(120,96,56)");
+    ctx.fill_rect(cx, cy + 2.0, 1.0, 2.0);
+    ctx.fill_rect(cx + 6.0, cy + 2.0, 1.0, 2.0);
+    ctx.set_fill_style_str("rgb(255,222,120)");
+    ctx.fill_rect(cx + 2.0, cy + 1.0, 3.0, 1.0);
+    ctx.fill_rect(cx + 3.0, cy, 1.0, 1.0);
 }
 
 fn draw_scaffold(
@@ -245,6 +268,60 @@ fn draw_scaffold(
     let k = (progress / cost).clamp(0.0, 1.0) as f64;
     ctx.set_fill_style_str(&shade(r, g, b, 1.1));
     ctx.fill_rect(px + 1.0, py + 1.0, 5.0 * k, 1.0);
+}
+
+fn draw_animal(
+    ctx: &CanvasRenderingContext2d,
+    cx: f64,
+    cy: f64,
+    species: Species,
+    dir_x: i32,
+    domestic: bool,
+) {
+    match species {
+        Species::Deer => {
+            ctx.set_fill_style_str("rgb(196,128,74)");
+            ctx.fill_rect(cx, cy + 1.0, 4.0, 2.0);
+            ctx.fill_rect(cx + 3.0, cy, 2.0, 2.0);
+            ctx.set_fill_style_str("rgb(150,96,54)");
+            ctx.fill_rect(cx + 1.0, cy + 2.0, 4.0, 1.0);
+            ctx.set_fill_style_str("rgb(240,214,168)");
+            ctx.fill_rect(cx + 1.0, cy + 1.0, 1.0, 1.0);
+        }
+        Species::Boar => {
+            ctx.set_fill_style_str("rgb(122,102,74)");
+            ctx.fill_rect(cx - 1.0, cy, 5.0, 3.0);
+            ctx.set_fill_style_str("rgb(94,76,54)");
+            ctx.fill_rect(cx - 1.0, cy + 1.0, 5.0, 1.0);
+            ctx.set_fill_style_str("rgb(196,164,120)");
+            ctx.fill_rect(cx + 1.0, cy + 2.0, 2.0, 1.0);
+        }
+        Species::Wolf => {
+            ctx.set_fill_style_str("rgb(116,124,134)");
+            ctx.fill_rect(cx, cy + 1.0, 5.0, 2.0);
+            ctx.fill_rect(cx + 3.0, cy, 2.0, 3.0);
+            ctx.set_fill_style_str("rgb(84,92,102)");
+            ctx.fill_rect(cx, cy + 2.0, 5.0, 1.0);
+            ctx.set_fill_style_str("rgb(238,240,244)");
+            ctx.fill_rect(cx + 4.0, cy, 1.0, 1.0);
+        }
+        Species::Cow => {
+            ctx.set_fill_style_str("rgb(238,238,244)");
+            ctx.fill_rect(cx - 1.0, cy, 6.0, 3.0);
+            ctx.set_fill_style_str("rgb(40,38,48)");
+            ctx.fill_rect(cx, cy, 1.0, 1.0);
+            ctx.fill_rect(cx + 3.0, cy + 2.0, 1.0, 1.0);
+            ctx.fill_rect(cx, cy + 2.0, 1.0, 1.0);
+            ctx.fill_rect(cx + 4.0, cy + 1.0, 1.0, 1.0);
+            ctx.set_fill_style_str("rgb(172,118,96)");
+            ctx.fill_rect(cx - 1.0, cy + 1.0, 1.0, 2.0);
+        }
+    }
+    let _ = dir_x;
+    if domestic {
+        ctx.set_fill_style_str("rgb(255,222,120)");
+        ctx.fill_rect(cx + 1.0, cy - 1.0, 2.0, 1.0);
+    }
 }
 
 pub fn draw(
@@ -402,6 +479,7 @@ pub fn draw(
             Role::Worker => "rgb(200,205,215)",
             Role::Farmer => "rgb(126,231,135)",
             Role::Miner => "rgb(228,190,84)",
+            Role::Hunter => "rgb(255,140,80)",
         };
         ctx.set_fill_style_str(role_col);
         ctx.fill_rect(fx + 3.0, fy + 2.0, 1.0, 1.0);
@@ -416,10 +494,27 @@ pub fn draw(
                 crate::sim::ResourceKind::Food => "rgb(126,231,135)",
                 crate::sim::ResourceKind::Water => "rgb(88,166,255)",
                 crate::sim::ResourceKind::Ore => "rgb(228,190,84)",
+                crate::sim::ResourceKind::Meat => "rgb(232,120,96)",
+                crate::sim::ResourceKind::Gold => "rgb(255,222,120)",
             };
             ctx.set_fill_style_str(col);
             ctx.fill_rect(fx + 1.0, fy - 1.0, 3.0, 1.0);
         }
+    }
+
+for a in &sim.animals {
+        draw_animal(
+            &ctx,
+            a.x as f64 * CELL,
+            a.y as f64 * CELL,
+            a.species,
+            0,
+            a.home.is_some(),
+        );
+    }
+
+    for c in &sim.caravans {
+        draw_caravan(&ctx, c.x as f64 * CELL, c.y as f64 * CELL);
     }
 
     match sim.weather {
@@ -514,17 +609,37 @@ pub fn draw(
             }
         };
         lines.push(format!(
-            "{} {}  pop {}  f{} w{} o{}{}",
+            "{} {}  pop {}  f{} w{} o{} m{} g{}{}",
             "◆", ruler, sim.pop(i),
-            t.stocks.food as i32, t.stocks.water as i32, t.stocks.ore as i32, mark
+            t.stocks.food as i32, t.stocks.water as i32, t.stocks.ore as i32, t.stocks.meat as i32, t.stocks.gold as i32, mark
         ));
     }
+    let (mut deer, mut boar, mut wolf, mut cow) = (0, 0, 0, 0);
+    for a in &sim.animals {
+        match a.species {
+            Species::Deer => deer += 1,
+            Species::Boar => boar += 1,
+            Species::Wolf => wolf += 1,
+            Species::Cow => cow += 1,
+        }
+    }
+    lines.push(format!(
+        "animals deer {}  boar {}  wolf {}  cow {}  (herds {})",
+        deer, boar, wolf, cow,
+        sim.animals
+            .iter()
+            .filter(|a| a.species == Species::Cow && a.home.is_some())
+            .count()
+    ));
     lines.push(format!("dynasties {}  extinct {}  ideas {}  wars {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count()));
-    lines.push(format!("workers {}  farmers {}  miners {}", sim.agents.iter().filter(|a| a.role == Role::Worker).count(), sim.agents.iter().filter(|a| a.role == Role::Farmer).count(), sim.agents.iter().filter(|a| a.role == Role::Miner).count()));
+    let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
+    let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
+    lines.push(format!("gold {}  caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
+    lines.push(format!("workers {}  farmers {}  miners {}  hunters {}", sim.agents.iter().filter(|a| a.role == Role::Worker).count(), sim.agents.iter().filter(|a| a.role == Role::Farmer).count(), sim.agents.iter().filter(|a| a.role == Role::Miner).count(), sim.agents.iter().filter(|a| a.role == Role::Hunter).count()));
     lines.push(format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }));
     lines.push(String::new());
     lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
-    lines.push("1: 🏠  2: ⛲  R: новый мир".to_string());
+    lines.push("1: 🏠  2: ⛲  3: 🏦 пост  C: 🐄  R: новый мир".to_string());
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.set_stroke_style_str("rgb(70,78,90)");

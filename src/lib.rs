@@ -293,6 +293,27 @@ impl App {
         self.build_flash = Some((ti, 1.0));
     }
 
+    fn breed_cows(&mut self) {
+        let n = self.sim.borrow().towns.len();
+        if n == 0 {
+            return;
+        }
+        let ti = self.build_cursor % n;
+        let (x, y) = {
+            let s = self.sim.borrow();
+            (s.towns[ti].x, s.towns[ti].y)
+        };
+        if self.sim.borrow_mut().breed_domestic(ti) {
+            self.build_flash = Some((ti, 1.0));
+            self.effects.push(render::Fx {
+                x: x as f64 * CELL + CELL / 2.0,
+                y: y as f64 * CELL + CELL / 2.0,
+                life: 26.0,
+            });
+        }
+        self.build_cursor += 1;
+    }
+
     fn on_key(&mut self, e: KeyboardEvent) {
         match e.key().as_str() {
             " " => self.toggle_pause(),
@@ -303,6 +324,8 @@ impl App {
             "w" | "W" | "ц" | "Ц" => self.cycle_weather(),
             "1" => self.build(sim::BuildingKind::House),
             "2" => self.build(sim::BuildingKind::Well),
+            "3" => self.build(sim::BuildingKind::TradePost),
+            "c" | "C" | "с" | "С" => self.breed_cows(),
             "r" | "R" | "к" | "К" => self.new_world(),
             _ => {}
         }
@@ -513,6 +536,12 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnWell").ok_or("no btnWell")?, &app, |a| {
         a.build(sim::BuildingKind::Well)
+    })?;
+    bind_click(&document.get_element_by_id("btnPost").ok_or("no btnPost")?, &app, |a| {
+        a.build(sim::BuildingKind::TradePost)
+    })?;
+    bind_click(&document.get_element_by_id("btnCow").ok_or("no btnCow")?, &app, |a| {
+        a.breed_cows()
     })?;
 
     let app_loop = Rc::clone(&app);
