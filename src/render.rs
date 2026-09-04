@@ -312,6 +312,14 @@ pub fn draw(
 
     for (i, t) in sim.towns.iter().enumerate() {
         draw_house(ctx, t.x as f64 * CELL - 3.0, t.y as f64 * CELL - 2.0, t.r, t.g, t.b);
+        if t.at_war {
+            ctx.set_fill_style_str("rgb(232,68,64)");
+            ctx.fill_rect(t.x as f64 * CELL - 5.0, t.y as f64 * CELL - 7.0, 10.0, 7.0);
+            ctx.set_fill_style_str("rgb(255,214,96)");
+            ctx.fill_rect(t.x as f64 * CELL - 5.0, t.y as f64 * CELL - 7.0, 2.0, 2.0);
+            ctx.fill_rect(t.x as f64 * CELL + 3.0, t.y as f64 * CELL - 7.0, 2.0, 2.0);
+            ctx.fill_rect(t.x as f64 * CELL - 5.0, t.y as f64 * CELL - 1.0, 10.0, 1.0);
+        }
         let (bx, by) = (t.x as f64 * CELL - 14.0, t.y as f64 * CELL + 15.0);
         for (i, k) in t.built.iter().enumerate() {
             let sx = bx + (i % 6) as f64 * 8.0;
@@ -363,6 +371,12 @@ pub fn draw(
             ctx.set_fill_style_str("rgb(255,222,120)");
             ctx.fill_rect(fx, fy - 1.0, 2.0, 1.0);
         }
+        if a.raider {
+            ctx.set_fill_style_str("rgb(232,68,64)");
+            ctx.fill_rect(fx + 3.0, fy - 1.0, 2.0, 1.0);
+            ctx.set_fill_style_str("rgb(255,214,96)");
+            ctx.fill_rect(fx + 3.0, fy - 2.0, 1.0, 1.0);
+        }
         if let Some((kind, _)) = a.carry {
             let col = match kind {
                 crate::sim::ResourceKind::Food => "rgb(126,231,135)",
@@ -410,6 +424,7 @@ pub fn draw(
         format!("pop {}  food {}  water {}  ore {}", sim.agents.len(), food as i32, water as i32, ore as i32),
         format!("houses {}  wells {}  in_queue {}", houses, wells, pending),
         format!("dynasties {}  extinct {}", dynasty, extinct),
+        format!("wars {}", sim.towns.iter().filter(|t| t.at_war).count()),
         format!("fps {:.0}  speed x{:.1}{}", fps, speed, if paused { "  [PAUSED]" } else { "" }),
         String::new(),
         "Space: пауза   B: 🌱  1: 🏠  2: ⛲  R: мир".to_string(),

@@ -21,6 +21,16 @@ const BUILD_MIN_WATER: f32 = 10.0;
 const HOUSE_COST: f32 = 30.0;
 const WELL_COST: f32 = 20.0;
 const HOUSE_CAP_BONUS: usize = 4;
+const WAR_START_FOOD: f32 = 55.0;
+const WAR_START_WATER: f32 = 40.0;
+const WAR_START_POP: usize = 8;
+const WAR_START_TOWN_RANGE: f32 = 60.0;
+const ARMY_TARGETS_POP: usize = 8;
+const RAISE_FOOD: f32 = 20.0;
+const RAID_CHANCE_PER_TICK: f32 = 0.06;
+const RAID_TARGET_POP: usize = 6;
+const PEACE_CHANCE_PER_TICK: f32 = 0.02;
+const PEACE_FOOD_WATER_MIN: f32 = 70.0;
 const WELL_WATER_PER_TICK: f32 = 0.3;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -86,6 +96,8 @@ pub struct Agent {
     pub carry: Option<(ResourceKind, f32)>,
     pub family: usize,
     pub founder: bool,
+    pub raider: bool,
+    pub target_town: Option<usize>,
 }
 
 pub struct Settlement {
@@ -98,6 +110,9 @@ pub struct Settlement {
     pub cap: usize,
     pub queue: Vec<(BuildingKind, f32)>,
     pub built: Vec<BuildingKind>,
+    pub at_war: bool,
+    pub raiders: u32,
+    pub enemy: Option<usize>,
 }
 
 pub struct Family {
@@ -348,6 +363,9 @@ impl Sim {
                 cap: 12,
                 queue: Vec::new(),
                 built: Vec::new(),
+                at_war: false,
+                raiders: 0,
+                enemy: None,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -390,6 +408,8 @@ impl Sim {
                     carry: None,
                     family,
                     founder,
+                    raider: false,
+                    target_town: None,
                 });
                 self.families[family].members += 1;
                 return;
@@ -408,6 +428,8 @@ impl Sim {
             carry: None,
             family,
             founder,
+            raider: false,
+            target_town: None,
         });
         self.families[family].members += 1;
     }
@@ -514,19 +536,21 @@ impl Sim {
         for &i in dead.iter().rev() {
             self.agents.remove(i);
         }
+        self.release_dead_raiders(&dead);
 
         if self.tick_count % BIRTH_EVERY == 0 {
             self.reproduction();
         }
         self.sync_families();
+        self.war_step();
     }
 
     fn decide(&self, a: &Agent) -> (Action, ResourceKind) {
         if a.hunger >= STARVE || a.thirst >= STARVE {
             return (Action::Die, a.want);
         }
-        if a.energy <= 6.0 {
-            return (Action::Stay, a.want);
+        if a.raider {
+            return self.army_action(a);
         }
         let t = &self.towns[a.home];
         let (hx, hy) = (t.x, t.y);
@@ -717,34 +741,39 @@ impl Sim {
                     return;
                 }
                 let wadj = self.is_water_adj(nx, ny);
-                let a = &mut self.agents[i];
-                a.x = nx;
-                a.y = ny;
-                a.dir_x = (nx - ox).clamp(-1, 1);
-                a.dir_y = (ny - oy).clamp(-1, 1);
-                a.energy -= 0.6;
-                if a.carry.is_none() {
-                    match a.want {
-                        ResourceKind::Food => {
-                            let c = &self.grid[idx(nx, ny)];
-                            if c.terrain == Terrain::Forest && c.food > 0.5 {
-                                self.grid[idx(nx, ny)].food -= 1.0;
-                                a.carry = Some((ResourceKind::Food, 2.0));
+                {
+                    let a = &mut self.agents[i];
+                    a.x = nx;
+                    a.y = ny;
+                    a.dir_x = (nx - ox).clamp(-1, 1);
+                    a.dir_y = (ny - oy).clamp(-1, 1);
+                    a.energy -= 0.6;
+                    if a.carry.is_none() {
+                        match a.want {
+                            ResourceKind::Food => {
+                                let c = &self.grid[idx(nx, ny)];
+                                if c.terrain == Terrain::Forest && c.food > 0.5 {
+                                    self.grid[idx(nx, ny)].food -= 1.0;
+                                    a.carry = Some((ResourceKind::Food, 2.0));
+                                }
                             }
-                        }
-                        ResourceKind::Water => {
-                            if wadj && self.grid[idx(nx, ny)].terrain.walkable() {
-                                a.carry = Some((ResourceKind::Water, 2.0));
+                            ResourceKind::Water => {
+                                if wadj && self.grid[idx(nx, ny)].terrain.walkable() {
+                                    a.carry = Some((ResourceKind::Water, 2.0));
+                                }
                             }
-                        }
-                        ResourceKind::Ore => {
-                            let c = &self.grid[idx(nx, ny)];
-                            if c.terrain == Terrain::Hills && c.ore > 0.5 {
-                                self.grid[idx(nx, ny)].ore -= 1.0;
-                                a.carry = Some((ResourceKind::Ore, 1.0));
+                            ResourceKind::Ore => {
+                                let c = &self.grid[idx(nx, ny)];
+                                if c.terrain == Terrain::Hills && c.ore > 0.5 {
+                                    self.grid[idx(nx, ny)].ore -= 1.0;
+                                    a.carry = Some((ResourceKind::Ore, 1.0));
+                                }
                             }
                         }
                     }
+                }
+                if self.agents[i].raider {
+                    self.combat_check(i);
                 }
             }
             Action::Stay => {
@@ -812,6 +841,190 @@ impl Sim {
             self.spawn_agent(fam_town, tx, ty, fid, false);
             self.families[fid].children += 1;
             used_town[fam_town] = true;
+        }
+    }
+
+    fn neighbors(&self, i: usize, j: usize) -> bool {
+        let (x1, y1) = (self.towns[i].x, self.towns[i].y);
+        let (x2, y2) = (self.towns[j].x, self.towns[j].y);
+        let d = ((x1 - x2).pow(2) as f32 + (y1 - y2).pow(2) as f32).sqrt();
+        d <= WAR_START_TOWN_RANGE
+    }
+
+    fn war_step(&mut self) {
+        for i in 0..self.towns.len() {
+            if self.towns[i].at_war {
+                if self.towns[i].raiders <= 0 {
+                    if self.pop(i) >= ARMY_TARGETS_POP {
+                        let count = ((self.pop(i) as f32 * 0.3).min(6.0)) as u32;
+                        self.muster_army(i, count);
+                    } else if self.towns[i].stocks.food < 12.0 && self.towns[i].stocks.water < 8.0 {
+                        self.end_war(i);
+                    } else if self.raiders_ok(&self.towns[i]) && rfrac(&mut self.rng) < PEACE_CHANCE_PER_TICK
+                    {
+                        self.end_war(i);
+                    }
+                }
+                continue;
+            }
+            if rfrac(&mut self.rng) < RAID_CHANCE_PER_TICK {
+                self.try_raid(i);
+            }
+        }
+    }
+
+    fn try_raid(&mut self, ti: usize) {
+        if self.pop(ti) < WAR_START_POP {
+            return;
+        }
+        {
+            let me = &self.towns[ti];
+            if me.stocks.food < WAR_START_FOOD || me.stocks.water < WAR_START_WATER {
+                return;
+            }
+        }
+        for j in 0..self.towns.len() {
+            if j == ti || self.towns[j].at_war || !self.neighbors(ti, j) || self.pop(j) < RAID_TARGET_POP {
+                continue;
+            }
+            let mut r = 1.5f32;
+            for (k, _) in self.towns.iter().enumerate() {
+                if k != ti && k != j && self.neighbors(j, k) {
+                    r = (r * 1.4).min(8.0);
+                }
+            }
+            if rfrac(&mut self.rng) < 1.0 / r {
+                let raiders = ((self.towns[ti].stocks.food / RAISE_FOOD).min(4.0) as u32).max(1);
+                self.declare_war(ti, j, raiders);
+                if rfrac(&mut self.rng) < 0.6 {
+                    self.declare_war(j, ti, 1);
+                }
+                return;
+            }
+        }
+    }
+
+    fn declare_war(&mut self, ti: usize, enemy: usize, raiders: u32) {
+        self.towns[ti].at_war = true;
+        self.towns[ti].enemy = Some(enemy);
+        self.muster_army(ti, raiders);
+    }
+
+    fn muster_army(&mut self, ti: usize, count: u32) {
+        let enemy = self.towns[ti].enemy;
+        let mut left = count;
+        for i in 0..self.agents.len() {
+            if left == 0 {
+                break;
+            }
+            if self.agents[i].home == ti && !self.agents[i].raider {
+                self.agents[i].raider = true;
+                self.agents[i].target_town = enemy;
+                left -= 1;
+            }
+        }
+        self.towns[ti].raiders = count;
+    }
+
+    fn release_dead_raiders(&mut self, dead: &[usize]) {
+        let mut homes = Vec::new();
+        for &i in dead {
+            if i < self.agents.len() && self.agents[i].raider {
+                homes.push(self.agents[i].home);
+            }
+        }
+        for ti in homes {
+            if ti < self.towns.len() {
+                self.towns[ti].raiders = self.towns[ti].raiders.saturating_sub(1);
+            }
+        }
+    }
+
+    fn raiders_ok(&self, t: &Settlement) -> bool {
+        t.stocks.food >= PEACE_FOOD_WATER_MIN && t.stocks.water >= PEACE_FOOD_WATER_MIN
+    }
+
+    fn end_war(&mut self, ti: usize) {
+        self.towns[ti].at_war = false;
+        self.towns[ti].raiders = 0;
+        self.towns[ti].enemy = None;
+        for a in self.agents.iter_mut() {
+            if a.home == ti {
+                a.raider = false;
+                a.target_town = None;
+            }
+        }
+    }
+
+    fn army_action(&self, a: &Agent) -> (Action, ResourceKind) {
+        let t = &self.towns[a.home];
+        let (tx, ty) = (t.x, t.y);
+        let at_home = (a.x - tx).abs() <= 1 && (a.y - ty).abs() <= 1;
+        let dn = a.target_town;
+        if a.carry.is_some() {
+            if at_home {
+                (Action::Deposit, ResourceKind::Food)
+            } else {
+                let (nx, ny) = self.steer(a, tx, ty);
+                (Action::Move(nx, ny), ResourceKind::Food)
+            }
+        } else if let Some(j) = dn {
+            if j >= self.towns.len() {
+                (Action::Stay, ResourceKind::Food)
+            } else {
+                let (ex, ey) = (self.towns[j].x, self.towns[j].y);
+                let (nx, ny) = self.steer(a, ex, ey);
+                (Action::Move(nx, ny), ResourceKind::Food)
+            }
+        } else if at_home {
+            if self.towns[a.home].stocks.food > 0.0 {
+                (Action::Stay, ResourceKind::Food)
+            } else {
+                self.gather_action(a, Some(ResourceKind::Food))
+            }
+        } else {
+            let (nx, ny) = self.steer(a, tx, ty);
+            (Action::Move(nx, ny), ResourceKind::Food)
+        }
+    }
+
+    fn combat_check(&mut self, i: usize) {
+        let (my_x, my_y) = {
+            let a = &self.agents[i];
+            (a.x, a.y)
+        };
+        let Some(j) = self.agents[i].target_town else {
+            return;
+        };
+        if j >= self.towns.len() || !self.towns[j].at_war {
+            return;
+        }
+        let (ex, ey) = (self.towns[j].x, self.towns[j].y);
+        let d = (my_x - ex).abs().max(my_y - ey);
+        if d <= 4 {
+            let t = &mut self.towns[j];
+            let take_f = t.stocks.food.min(3.0);
+            t.stocks.food -= take_f;
+            let take_w = t.stocks.water.min(2.0);
+            t.stocks.water -= take_w;
+        }
+        for k in 0..self.agents.len() {
+            if k == i {
+                continue;
+            }
+            let foe = {
+                let b = &self.agents[k];
+                (b.home, b.raider, b.x, b.y)
+            };
+            if foe.1 || foe.0 == self.agents[i].home {
+                continue;
+            }
+            if (foe.2 - my_x).abs() <= 1 && (foe.3 - my_y).abs() <= 1 {
+                if rfrac(&mut self.rng) < 0.3 {
+                    self.agents[k].hunger = STARVE;
+                }
+                return;
+            }
         }
     }
 
@@ -1151,5 +1364,76 @@ mod tests {
         }
         assert!(s.agents.len() <= before * 4 + 10);
         assert!(total_food(&s) >= 0.0);
+    }
+
+    fn prep_two_towns(s: &mut Sim) {
+        let keep = |home: usize| home < 2;
+        s.agents.retain(|a| keep(a.home));
+        for t in 0..2 {
+            s.towns[t].stocks.food = 200.0;
+            s.towns[t].stocks.water = 150.0;
+            s.towns[t].stocks.ore = 100.0;
+            while s.pop(t) < 9 {
+                let (tx, ty) = (s.towns[t].x, s.towns[t].y);
+                s.spawn_agent(t, tx, ty, 0, false);
+            }
+        }
+    }
+
+    #[test]
+    fn war_declares_and_musters_raiders() {
+        let mut s = Sim::new(33);
+        prep_two_towns(&mut s);
+        let mut found = false;
+        for _ in 0..40 {
+            s.try_raid(0);
+            if s.towns[1].at_war {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "neighbor town should eventually be raided");
+        assert_eq!(s.towns[1].enemy, Some(0));
+        assert!(s.agents.iter().any(|a| a.home == 1 && a.raider));
+    }
+
+    #[test]
+    fn combat_kills_defenders_and_loots() {
+        let mut s = Sim::new(34);
+        prep_two_towns(&mut s);
+        let (ex, ey) = (s.towns[1].x, s.towns[1].y);
+        s.agents.retain(|a| !(a.home == 0));
+        let ridx = s.agents.len();
+        s.spawn_agent(0, ex + 1, ey, 0, false);
+        let r = &mut s.agents[ridx];
+        r.raider = true;
+        r.target_town = Some(1);
+        s.towns[1].at_war = true;
+        s.towns[1].enemy = Some(0);
+        let food_before = s.towns[1].stocks.food;
+        let mut killed = false;
+        for _ in 0..60 {
+            s.combat_check(ridx);
+            if s.agents.iter().any(|a| a.home == 1 && a.hunger >= STARVE) {
+                killed = true;
+                break;
+            }
+        }
+        assert!(killed, "raider should kill nearby defenders");
+        assert!(s.towns[1].stocks.food < food_before, "raider should loot food");
+    }
+
+    #[test]
+    fn end_war_demobilizes_force() {
+        let mut s = Sim::new(35);
+        prep_two_towns(&mut s);
+        s.declare_war(1, 0, 3);
+        assert!(s.towns[1].at_war);
+        assert!(s.agents.iter().any(|a| a.home == 1 && a.raider));
+        s.end_war(1);
+        assert!(!s.towns[1].at_war);
+        assert_eq!(s.towns[1].enemy, None);
+        assert_eq!(s.towns[1].raiders, 0);
+        assert!(s.agents.iter().all(|a| a.home != 1 || (!a.raider && a.target_town.is_none())));
     }
 }
