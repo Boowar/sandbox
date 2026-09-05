@@ -48,7 +48,7 @@ const HUNGRY_AT: f32 = 60.0;
 const THIRSTY_AT: f32 = 60.0;
 const STARVE: f32 = 100.0;
 const BIRTH_EVERY: u64 = 220;
-const REGROW_EVERY: u64 = 22;
+const REGROW_EVERY: u64 = 44;
 const MAX_AGENTS: usize = 300;
 const BIRTH_MIN_FOOD: f32 = 30.0;
 const BIRTH_MIN_WATER: f32 = 20.0;
@@ -1579,7 +1579,7 @@ impl Sim {
                     let i = idx(x as i32, y as i32);
                     match self.grid[i].terrain {
                         Terrain::Forest => {
-                            let k = (self.grid[i].food / FOOD_MAX).max(0.85);
+                            let k = (self.grid[i].food / FOOD_MAX).max(0.3);
                             let ber = berry * season_berry * k + if abundant { 1.0 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
                         }
@@ -1612,12 +1612,12 @@ impl Sim {
                         }
                         Terrain::Hills | Terrain::Grass => {}
                         Terrain::Jungle => {
-                            let k = (self.grid[i].food / (FOOD_MAX * 1.5)).max(0.85);
+                            let k = (self.grid[i].food / (FOOD_MAX * 1.5)).max(0.3);
                             let ber = berry * season_berry * 1.3 * k + if abundant { 1.5 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 1.5);
                         }
                         Terrain::Tundra => {
-                            let k = (self.grid[i].food / (FOOD_MAX * 0.4)).max(0.80);
+                            let k = (self.grid[i].food / (FOOD_MAX * 0.4)).max(0.2);
                             let ber = berry * season_berry * 0.4 * k;
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 0.4);
                         }
@@ -5167,7 +5167,7 @@ mod tests {
             .position(|c| c.terrain == Terrain::Farm)
             .unwrap();
         s.grid[fidx].food = 0.5;
-        for _ in 0..23 {
+        for _ in 0..45 {
             s.tick();
         }
         assert!(
