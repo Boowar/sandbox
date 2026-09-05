@@ -29,11 +29,15 @@ struct App {
     paused: bool,
     bless_mode: bool,
     inspire_mode: bool,
+    build_mode: bool,
+    build_terrain: sim::Terrain,
     pending_bless: Vec<(usize, usize)>,
+    pending_build: Vec<(usize, usize)>,
     effects: Vec<render::Fx>,
     btn_pause: Element,
     btn_bless: Element,
     btn_inspire: Element,
+    btn_build: Element,
     speed_lbl: Element,
     speed: f64,
     acc: f64,
@@ -66,6 +70,36 @@ impl App {
                     y: y as f64 * CELL + CELL / 2.0,
                     life: 26.0,
                 });
+            }
+            render::draw_terrain(&self.terrain_ctx, &sim);
+        }
+        if !self.pending_build.is_empty() {
+            let pts: Vec<(usize, usize)> = self.pending_build.drain(..).collect();
+            let terrain = self.build_terrain;
+            let mut sim = self.sim.borrow_mut();
+            for (x, y) in pts {
+                if x < sim::W && y < sim::H {
+                    let i = y * sim::W + x;
+                    let old = sim.grid[i].terrain;
+                    if old != sim::Terrain::Water && old != sim::Terrain::Farm {
+                        sim.grid[i].terrain = terrain;
+                        match terrain {
+                            sim::Terrain::Forest => { sim.grid[i].food = 10.0; sim.grid[i].ore = 0.0; }
+                            sim::Terrain::Hills => { sim.grid[i].food = 0.0; sim.grid[i].ore = 60.0; }
+                            sim::Terrain::Water => { sim.grid[i].food = 0.0; sim.grid[i].ore = 0.0; sim.grid[i].water = 240.0; }
+                            sim::Terrain::Desert => { sim.grid[i].food = 1.0; sim.grid[i].ore = 0.0; }
+                            sim::Terrain::Tundra => { sim.grid[i].food = 4.0; sim.grid[i].ore = 0.0; }
+                            sim::Terrain::Jungle => { sim.grid[i].food = 15.0; sim.grid[i].ore = 0.0; }
+                            sim::Terrain::Grass => { sim.grid[i].food = 10.0; sim.grid[i].ore = 0.0; }
+                            sim::Terrain::Farm => {}
+                        }
+                        self.effects.push(render::Fx {
+                            x: x as f64 * CELL + CELL / 2.0,
+                            y: y as f64 * CELL + CELL / 2.0,
+                            life: 16.0,
+                        });
+                    }
+                }
             }
             render::draw_terrain(&self.terrain_ctx, &sim);
         }
@@ -132,6 +166,7 @@ impl App {
         self.bless_mode = !self.bless_mode;
         if self.bless_mode {
             self.inspire_mode = false;
+            self.build_mode = false;
         }
         self.sync_ui();
     }
@@ -140,7 +175,31 @@ impl App {
         self.inspire_mode = !self.inspire_mode;
         if self.inspire_mode {
             self.bless_mode = false;
+            self.build_mode = false;
         }
+        self.sync_ui();
+    }
+
+    fn toggle_build(&mut self) {
+        self.build_mode = !self.build_mode;
+        if self.build_mode {
+            self.bless_mode = false;
+            self.inspire_mode = false;
+        }
+        self.sync_ui();
+    }
+
+    fn cycle_build_terrain(&mut self) {
+        self.build_terrain = match self.build_terrain {
+            sim::Terrain::Forest => sim::Terrain::Hills,
+            sim::Terrain::Hills => sim::Terrain::Water,
+            sim::Terrain::Water => sim::Terrain::Desert,
+            sim::Terrain::Desert => sim::Terrain::Tundra,
+            sim::Terrain::Tundra => sim::Terrain::Jungle,
+            sim::Terrain::Jungle => sim::Terrain::Grass,
+            sim::Terrain::Grass => sim::Terrain::Forest,
+            sim::Terrain::Farm => sim::Terrain::Forest,
+        };
         self.sync_ui();
     }
 
@@ -382,6 +441,14 @@ impl App {
         }
     }
 
+    fn build_terrain_at(&mut self, client_x: i32, client_y: i32) {
+        if self.build_mode {
+            if let Some((x, y)) = self.to_grid(client_x as f64, client_y as f64) {
+                self.pending_build.push((x, y));
+            }
+        }
+    }
+
     fn build(&mut self, kind: sim::BuildingKind) {
         let n = self.sim.borrow().towns.len();
         if n == 0 {
@@ -421,6 +488,8 @@ impl App {
             "-" | "_" | "—" => self.change_speed(-1.0),
             "b" | "B" | "и" | "И" => self.toggle_bless(),
             "i" | "I" | "ш" | "Ш" => self.toggle_inspire(),
+            "n" | "N" | "т" | "Т" => self.toggle_build(),
+            "m" | "M" | "ь" | "Ь" => self.cycle_build_terrain(),
             "w" | "W" | "ц" | "Ц" => self.cycle_weather(),
             "1" => self.build(sim::BuildingKind::House),
             "2" => self.build(sim::BuildingKind::Well),
@@ -480,6 +549,7 @@ pub fn start() -> Result<(), JsValue> {
     let btn_pause = document.get_element_by_id("btnPause").ok_or("no btnPause")?;
     let btn_bless = document.get_element_by_id("btnBless").ok_or("no btnBless")?;
     let btn_inspire = document.get_element_by_id("btnInspire").ok_or("no btnInspire")?;
+    let btn_build = document.get_element_by_id("btnBuild").ok_or("no btnBuild")?;
     let speed_lbl = document.get_element_by_id("speedlbl").ok_or("no speedlbl")?;
 
     let seed = Date::now() as u64;
@@ -494,11 +564,15 @@ pub fn start() -> Result<(), JsValue> {
         paused: false,
         bless_mode: false,
         inspire_mode: false,
+        build_mode: false,
+        build_terrain: sim::Terrain::Forest,
         pending_bless: Vec::new(),
+        pending_build: Vec::new(),
         effects: Vec::new(),
         btn_pause: btn_pause.clone(),
         btn_bless: btn_bless.clone(),
         btn_inspire: btn_inspire.clone(),
+        btn_build: btn_build.clone(),
         speed_lbl,
         speed: 2.0,
         acc: 0.0,
@@ -545,6 +619,8 @@ pub fn start() -> Result<(), JsValue> {
                     app.bless_at(e.client_x(), e.client_y());
                 } else if app.inspire_mode {
                     app.inspire_at(e.client_x(), e.client_y());
+                } else if app.build_mode {
+                    app.build_terrain_at(e.client_x(), e.client_y());
                 }
             } else {
                 app.drag_ptr = None;
@@ -573,6 +649,8 @@ pub fn start() -> Result<(), JsValue> {
                     app.bless_at(e.client_x(), e.client_y());
                 } else if app.inspire_mode {
                     // остаёмся на месте: тап применяет идею, панорама отключена
+                } else if app.build_mode {
+                    app.build_terrain_at(e.client_x(), e.client_y());
                 } else {
                     app.pan_by(px - prev_x, py - prev_y);
                 }
@@ -633,6 +711,7 @@ pub fn start() -> Result<(), JsValue> {
     bind_click(&btn_pause, &app, |a| a.toggle_pause())?;
     bind_click(&btn_bless, &app, |a| a.toggle_bless())?;
     bind_click(&btn_inspire, &app, |a| a.toggle_inspire())?;
+    bind_click(&btn_build, &app, |a| a.toggle_build())?;
     bind_click(&document.get_element_by_id("btnWeather").ok_or("no btnWeather")?, &app, |a| {
         a.cycle_weather()
     })?;
