@@ -100,6 +100,49 @@ fn paint_farm(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     set_px(buf, ax + (h >> 7) as usize % 4, ay + 2 + ((h >> 9) % 2) as usize, 230, 214, 130);
 }
 
+fn paint_desert(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 210, 190, 120);
+    let h = hash2(x, y);
+    if h % 3 == 0 {
+        set_px(buf, ax + (h >> 2) as usize % 4, ay + (h >> 4) as usize % 4, 230, 210, 140);
+    }
+    if h % 5 == 0 {
+        set_px(buf, ax + (h >> 6) as usize % 4, ay + (h >> 8) as usize % 4, 180, 160, 100);
+    }
+    if h % 11 == 0 {
+        set_px(buf, ax + (h >> 10) as usize % 3, ay + (h >> 12) as usize % 3, 160, 140, 80);
+        set_px(buf, ax + (h >> 10) as usize % 3, ay + 1, 80, 140, 60);
+    }
+}
+
+fn paint_tundra(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 180, 195, 190);
+    let h = hash2(x, y);
+    if h % 3 == 0 {
+        set_px(buf, ax + (h >> 2) as usize % 4, ay + (h >> 4) as usize % 4, 160, 175, 170);
+    }
+    if h % 4 == 0 {
+        set_px(buf, ax + (h >> 6) as usize % 4, ay + (h >> 8) as usize % 4, 200, 210, 205);
+    }
+    if h % 7 == 0 {
+        set_px(buf, ax + (h >> 10) as usize % 4, ay + (h >> 12) as usize % 4, 140, 160, 130);
+    }
+}
+
+fn paint_jungle(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 20, 80, 20);
+    let h = hash2(x, y);
+    fill(buf, ax + (h % 2) as usize, ay, 3, 2, 30, 100, 28);
+    fill(buf, ax + 2, ay + 2, 2, 2, 40, 115, 35);
+    set_px(buf, ax + (h >> 3) as usize % 4, ay + (h >> 5) as usize % 4, 15, 65, 15);
+    if (h >> 7) % 3 == 0 {
+        set_px(buf, ax + (h >> 9) as usize % 4, ay + (h >> 11) as usize % 4, 60, 140, 50);
+    }
+    if (h >> 13) % 5 == 0 {
+        set_px(buf, ax + (h >> 15) as usize % 3, ay + (h >> 17) as usize % 3, 180, 60, 40);
+    }
+}
+
 pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
     let mut buf = vec![0u8; PW * PH * 4];
     for y in 0..H {
@@ -111,6 +154,9 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
                 Terrain::Forest => paint_forest(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Hills => paint_hills(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Farm => paint_farm(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Desert => paint_desert(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Tundra => paint_tundra(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Jungle => paint_jungle(&mut buf, ax, ay, x as i32, y as i32),
             }
         }
     }
@@ -476,7 +522,7 @@ pub fn draw(
     for y in 0..H {
         for x in 0..W {
             let c = &sim.grid[y * W + x];
-            if c.terrain == Terrain::Forest && c.food < 3.0 {
+            if (c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle) && c.food < 3.0 {
                 ctx.fill_rect(x as f64 * CELL, y as f64 * CELL, CELL, CELL);
             }
         }
