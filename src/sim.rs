@@ -2053,7 +2053,7 @@ impl Sim {
         self.animal_step(x, y, ax, ay, true)
     }
 
-    fn cheb(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
+    pub fn cheb(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
         (x1 - x2).abs().max((y1 - y2).abs())
     }
 

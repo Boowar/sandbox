@@ -722,9 +722,14 @@ pub fn draw(
         let (tr, tg, tb) = if a.home < town_col.len() { town_col[a.home] } else { (t.r, t.g, t.b) };
         let fx = a.x as f64 * CELL + 2.0;
         let fy = a.y as f64 * CELL + 1.0;
+        let fog_alpha = if sim.weather == Weather::Frost {
+            let dist = sim.cheb(a.x, a.y, t.x, t.y) as f32;
+            (dist / 30.0).min(0.6)
+        } else { 0.0 };
         if let Some(fam) = sim.families.get(a.family) {
             let (fr, fg, fb) = fam.accent;
             let alpha = if a.founder { 0.9 } else { 0.45 };
+            let alpha = alpha * (1.0 - fog_alpha);
             ctx.set_fill_style_str(&format!("rgba({},{},{},{:.2})", fr, fg, fb, alpha));
             ctx.fill_rect(fx - 1.0, fy - 1.0, 4.0, 4.0);
         }
@@ -833,16 +838,18 @@ for a in &sim.animals {
             ctx.fill_rect(0.0, 0.0, cw, ch);
         }
         Weather::Frost => {
-            ctx.set_fill_style_str("rgba(240,245,255,0.35)");
-            let ph = tick as usize % 7;
-            for i in 0..70usize {
-                let wx = (i as f64 * 131.0 + ph as f64 * 2.0) % cw;
-                let wy = (i as f64 * 61.0 + ph as f64 * 6.0) % ch;
-                ctx.fill_rect(wx, wy, 1.0, 1.0);
-                ctx.fill_rect(wx + 5.0, wy + 3.0, 1.0, 1.0);
-            }
-            ctx.set_fill_style_str("rgba(210,225,255,0.12)");
+            ctx.set_fill_style_str("rgba(200,210,230,0.18)");
             ctx.fill_rect(0.0, 0.0, cw, ch);
+        }
+    }
+
+    if sim.season == Season::Winter {
+        let ph = tick as usize % 11;
+        ctx.set_fill_style_str("rgba(240,245,255,0.12)");
+        for i in 0..120usize {
+            let wx = (i as f64 * 149.0 + ph as f64 * 3.0) % cw;
+            let wy = (i as f64 * 83.0 + ph as f64 * 2.0) % ch;
+            ctx.fill_rect(wx, wy, 2.0, 1.0);
         }
     }
 
