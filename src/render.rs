@@ -251,6 +251,14 @@ fn draw_building(
             ctx.fill_rect(px + 1.0, py + 3.0, 1.0, 1.0);
             ctx.fill_rect(px + 4.0, py + 3.0, 1.0, 1.0);
         }
+        crate::sim::BuildingKind::Sanctuary => {
+            ctx.set_fill_style_str("rgb(118,108,130)");
+            ctx.fill_rect(px, py + 3.0, 6.0, 2.0);
+            ctx.set_fill_style_str("rgb(148,138,162)");
+            ctx.fill_rect(px + 1.0, py + 1.0, 4.0, 3.0);
+            ctx.set_fill_style_str("rgb(255,222,120)");
+            ctx.fill_rect(px + 1.0, py, 4.0, 1.0);
+        }
     }
 }
 
@@ -499,6 +507,7 @@ pub fn draw(
             Role::Farmer => "rgb(126,231,135)",
             Role::Miner => "rgb(228,190,84)",
             Role::Hunter => "rgb(255,140,80)",
+            Role::Priest => "rgb(248,242,220)",
         };
         ctx.set_fill_style_str(role_col);
         ctx.fill_rect(fx + 3.0, fy + 2.0, 1.0, 1.0);
@@ -604,6 +613,11 @@ for a in &sim.animals {
         .iter()
         .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::TradePost).count())
         .sum();
+    let sanctuaries: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Sanctuary).count())
+        .sum();
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let dynasty = sim.families.iter().filter(|f| !f.extinct).count();
     let extinct = sim.families.len() - dynasty;
@@ -617,7 +631,22 @@ for a in &sim.animals {
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!("tick {}", sim.tick_count));
-    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, pending));
+    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, pending));
+    lines.push(format!("вера {}", sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0)));
+    let bless_name = match sim
+        .towns
+        .iter()
+        .find(|t| t.blessing != crate::sim::Blessing::None)
+        .map(|t| t.blessing)
+    {
+        Some(crate::sim::Blessing::Fertility) => "7 плодородие",
+        Some(crate::sim::Blessing::Abundance) => "7 изобилие",
+        Some(crate::sim::Blessing::Protection) => "7 защита",
+        _ => "",
+    };
+    if !bless_name.is_empty() {
+        lines.push(format!("благословение: {}", bless_name));
+    }
     for (i, t) in sim.towns.iter().enumerate() {
         let ruler = sim
             .families
@@ -668,7 +697,7 @@ for a in &sim.animals {
     lines.push(format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }));
     lines.push(String::new());
     lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
-    lines.push("1: 🏠  2: ⛲  3: 🏦 пост  4: 🌾 ферма  C: 🐄  R: новый мир".to_string());
+    lines.push("1: 🏠  2: ⛲  3: 🏦  4: 🌾  5: ⛪   C: 🐄   R: новый мир".to_string());
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.set_stroke_style_str("rgb(70,78,90)");

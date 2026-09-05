@@ -62,6 +62,12 @@ const FARM_COST: f32 = 30.0;
 const FARM_PATCH: usize = 16;
 const FARM_FOOD_MAX: f32 = 8.0;
 
+const SANCTUARY_COST: f32 = 35.0;
+const FAITH_GAIN_PER_TICK: f32 = 0.02;
+const RITUAL_EVERY: u64 = 600;
+const FAITH_SPEND: f32 = 40.0;
+const BLESS_LEN: f64 = 900.0;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -84,6 +90,15 @@ pub enum Role {
     Farmer,
     Miner,
     Hunter,
+    Priest,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Blessing {
+    None,
+    Fertility,
+    Abundance,
+    Protection,
 }
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
@@ -151,6 +166,7 @@ pub enum BuildingKind {
     Well,
     TradePost,
     Farm,
+    Sanctuary,
 }
 
 impl BuildingKind {
@@ -160,6 +176,7 @@ impl BuildingKind {
             BuildingKind::Well => WELL_COST,
             BuildingKind::TradePost => TRADE_POST_COST,
             BuildingKind::Farm => FARM_COST,
+            BuildingKind::Sanctuary => SANCTUARY_COST,
         }
     }
 }
@@ -223,6 +240,9 @@ pub struct Settlement {
     pub enemy: Option<usize>,
     pub idea: TownIdea,
     pub idea_left: f64,
+    pub faith: f32,
+    pub blessing: Blessing,
+    pub blessing_left: f64,
 }
 
 pub struct Family {
@@ -505,6 +525,9 @@ impl Sim {
                 enemy: None,
                 idea: TownIdea::None,
                 idea_left: 0.0,
+                faith: 0.0,
+                blessing: Blessing::None,
+                blessing_left: 0.0,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -910,6 +933,26 @@ impl Sim {
         }
     }
 
+    fn promote_priest(&mut self, ti: usize) {
+        if self.towns[ti].built.iter().any(|b| *b == BuildingKind::Sanctuary) {
+            return;
+        }
+        for fid in 0..self.families.len() {
+            if self.families[fid].town != ti || self.families[fid].extinct {
+                continue;
+            }
+            if self.families[fid].role == Role::Worker {
+                self.families[fid].role = Role::Priest;
+                for a in self.agents.iter_mut() {
+                    if a.family == fid {
+                        a.role = Role::Priest;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     fn plant_fields(&mut self, cx: i32, cy: i32) {
         let mut cands = Vec::new();
         for dy in -6..=6 {
@@ -979,6 +1022,9 @@ impl Sim {
                     };
                     self.plant_fields(x, y);
                 }
+                if k == BuildingKind::Sanctuary {
+                    self.promote_priest(ti);
+                }
                 self.towns[ti].built.push(k);
             }
         }
@@ -1003,6 +1049,7 @@ impl Sim {
         }
 
         if self.tick_count % REGROW_EVERY == 0 {
+            let abundant = self.towns.iter().any(|t| t.blessing == Blessing::Abundance);
             let berry = match self.weather {
                 Weather::Rain => 2.0,
                 Weather::Frost => 0.5,
@@ -1015,8 +1062,12 @@ impl Sim {
             };
             for cell in self.grid.iter_mut() {
                 match cell.terrain {
-                    Terrain::Forest => cell.food = (cell.food + berry).min(FOOD_MAX),
-                    Terrain::Farm => cell.food = (cell.food + crop).min(FARM_FOOD_MAX),
+                    Terrain::Forest => {
+                        cell.food = (cell.food + berry + if abundant { 1.0 } else { 0.0 }).min(FOOD_MAX)
+                    }
+                    Terrain::Farm => {
+                        cell.food = (cell.food + crop + if abundant { 1.0 } else { 0.0 }).min(FARM_FOOD_MAX)
+                    }
                     Terrain::Hills => cell.ore = (cell.ore + 0.5).min(ORE_MAX),
                     _ => {}
                 }
@@ -1040,6 +1091,28 @@ impl Sim {
                 if t.idea_left <= 0.0 {
                     t.idea = TownIdea::None;
                 }
+            }
+            let sanctuaries = t.built.iter().filter(|b| **b == BuildingKind::Sanctuary).count() as f32;
+            if sanctuaries > 0.0 {
+                t.faith = (t.faith + FAITH_GAIN_PER_TICK * sanctuaries).min(100.0);
+            }
+            if t.blessing_left > 0.0 {
+                t.blessing_left -= 1.0;
+                if t.blessing_left <= 0.0 {
+                    t.blessing = Blessing::None;
+                }
+            }
+            if self.tick_count % RITUAL_EVERY == 0 && t.faith >= FAITH_SPEND {
+                t.faith -= FAITH_SPEND;
+                let roll = rfrac(&mut self.rng);
+                t.blessing = if roll < 0.4 {
+                    Blessing::Fertility
+                } else if roll < 0.7 {
+                    Blessing::Abundance
+                } else {
+                    Blessing::Protection
+                };
+                t.blessing_left = BLESS_LEN;
             }
         }
 
@@ -1319,6 +1392,9 @@ impl Sim {
     }
 
     fn bite_agent(&mut self, ax: i32, ay: i32) {
+        if self.protected() {
+            return;
+        }
         for a in self.agents.iter_mut() {
             if (a.x - ax).abs().max(a.y - ay) <= 1 {
                 a.hunger = (a.hunger + 45.0).min(140.0);
@@ -1510,6 +1586,10 @@ impl Sim {
             Role::Hunter => (
                 ResourceKind::Meat,
                 st.meat < 15.0 && st.water > 8.0 && st.food > 8.0,
+            ),
+            Role::Priest => (
+                ResourceKind::Gold,
+                st.gold > 5.0 && st.water > 8.0 && st.food > 8.0,
             ),
         };
         if ok && kind != need {
@@ -1807,6 +1887,10 @@ impl Sim {
         }
     }
 
+    fn protected(&self) -> bool {
+        self.towns.iter().any(|t| t.blessing == Blessing::Protection)
+    }
+
     fn reproduction(&mut self) {
         if self.agents.len() >= MAX_AGENTS {
             return;
@@ -1828,7 +1912,9 @@ impl Sim {
                 continue;
             }
             let (tx, ty) = (self.towns[fam_town].x, self.towns[fam_town].y);
-            let (cf, cw) = if self.towns[fam_town].idea == TownIdea::Prosperity {
+            let (cf, cw) = if self.towns[fam_town].idea == TownIdea::Prosperity
+                || self.towns[fam_town].blessing == Blessing::Fertility
+            {
                 (BIRTH_FOOD * 0.5, BIRTH_WATER * 0.5)
             } else {
                 (BIRTH_FOOD, BIRTH_WATER)
@@ -2811,6 +2897,76 @@ mod tests {
             "trade post should earn trickle gold ({} -> {})",
             g0,
             s.towns[0].stocks.gold
+        );
+    }
+
+    #[test]
+    fn sanctuary_accumulates_faith() {
+        let mut s = Sim::new(80);
+        s.towns[0].built = vec![BuildingKind::Sanctuary];
+        for _ in 0..100 {
+            s.tick();
+        }
+        assert!(
+            s.towns[0].faith > 1.0,
+            "sanctuary should accumulate faith (got {})",
+            s.towns[0].faith
+        );
+    }
+
+    #[test]
+    fn ritual_grants_blessing_and_spends_faith() {
+        let mut s = Sim::new(81);
+        s.towns[0].built = vec![BuildingKind::Sanctuary];
+        s.towns[0].faith = 60.0;
+        s.tick_count = RITUAL_EVERY - 1;
+        s.tick();
+        assert_ne!(s.towns[0].blessing, Blessing::None, "ritual should grant blessing");
+        assert!(
+            s.towns[0].faith < 60.0,
+            "ritual should spend faith (got {})",
+            s.towns[0].faith
+        );
+    }
+
+    #[test]
+    fn fertility_blessing_halves_birth_cost() {
+        let mut s = Sim::new(82);
+        s.towns[0].blessing = Blessing::Fertility;
+        s.towns[0].cap = 100;
+        s.towns[0].stocks = Stock { food: 60.0, water: 60.0, ore: 40.0, meat: 15.0, gold: 0.0 };
+        let f0 = s.towns[0].stocks.food;
+        s.families[0].members = 2;
+        let before = s.agents.len();
+        s.reproduction();
+        assert_eq!(s.agents.len(), before + 1, "fertility should allow a birth");
+        assert!(
+            f0 - s.towns[0].stocks.food <= BIRTH_FOOD * 0.5 + 0.001,
+            "fertility should halve food cost ({} -> {})",
+            f0,
+            s.towns[0].stocks.food
+        );
+    }
+
+    #[test]
+    fn sanctuary_ordains_priest() {
+        let mut s = Sim::new(83);
+        s.towns[0].queue.push((BuildingKind::Sanctuary, SANCTUARY_COST - 1.0));
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0 };
+        for _ in 0..220 {
+            s.tick();
+        }
+        assert!(
+            s.towns[0].built.iter().any(|b| *b == BuildingKind::Sanctuary),
+            "sanctuary should be built"
+        );
+        assert!(
+            s.families.iter().any(|f| f.town == 0 && !f.extinct && f.role == Role::Priest),
+            "a family should be ordained as priest"
+        );
+        assert!(
+            s.agents.iter().any(|a| a.role == Role::Priest),
+            "priest agents should exist"
         );
     }
 
