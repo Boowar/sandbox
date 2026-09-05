@@ -327,6 +327,7 @@ impl App {
             "3" => self.build(sim::BuildingKind::TradePost),
             "4" => self.build(sim::BuildingKind::Farm),
             "5" => self.build(sim::BuildingKind::Sanctuary),
+            "6" => self.build(sim::BuildingKind::Clinic),
             "c" | "C" | "с" | "С" => self.breed_cows(),
             "r" | "R" | "к" | "К" => self.new_world(),
             _ => {}
@@ -547,6 +548,9 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnChurch").ok_or("no btnChurch")?, &app, |a| {
         a.build(sim::BuildingKind::Sanctuary)
+    })?;
+    bind_click(&document.get_element_by_id("btnClinic").ok_or("no btnClinic")?, &app, |a| {
+        a.build(sim::BuildingKind::Clinic)
     })?;
     bind_click(&document.get_element_by_id("btnCow").ok_or("no btnCow")?, &app, |a| {
         a.breed_cows()

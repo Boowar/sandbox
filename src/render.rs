@@ -259,6 +259,16 @@ fn draw_building(
             ctx.set_fill_style_str("rgb(255,222,120)");
             ctx.fill_rect(px + 1.0, py, 4.0, 1.0);
         }
+        crate::sim::BuildingKind::Clinic => {
+            ctx.set_fill_style_str("rgb(230,234,238)");
+            ctx.fill_rect(px, py, 6.0, 4.0);
+            ctx.set_fill_style_str("rgb(64,180,170)");
+            ctx.fill_rect(px, py, 1.0, 4.0);
+            ctx.fill_rect(px + 5.0, py, 1.0, 4.0);
+            ctx.set_fill_style_str("rgb(224,60,56)");
+            ctx.fill_rect(px + 2.0, py + 1.0, 1.0, 2.0);
+            ctx.fill_rect(px + 3.0, py + 1.0, 1.0, 2.0);
+        }
     }
 }
 
@@ -508,9 +518,14 @@ pub fn draw(
             Role::Miner => "rgb(228,190,84)",
             Role::Hunter => "rgb(255,140,80)",
             Role::Priest => "rgb(248,242,220)",
+            Role::Healer => "rgb(120,220,214)",
         };
         ctx.set_fill_style_str(role_col);
         ctx.fill_rect(fx + 3.0, fy + 2.0, 1.0, 1.0);
+        if a.sick > 0 {
+            ctx.set_fill_style_str("rgb(255,64,64)");
+            ctx.fill_rect(fx + 3.0, fy + 4.0, 1.0, 1.0);
+        }
         if a.raider {
             ctx.set_fill_style_str("rgb(232,68,64)");
             ctx.fill_rect(fx + 3.0, fy - 1.0, 2.0, 1.0);
@@ -618,6 +633,12 @@ for a in &sim.animals {
         .iter()
         .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Sanctuary).count())
         .sum();
+    let clinics: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Clinic).count())
+        .sum();
+    let sick = sim.agents.iter().filter(|a| a.sick > 0).count();
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let dynasty = sim.families.iter().filter(|f| !f.extinct).count();
     let extinct = sim.families.len() - dynasty;
@@ -631,8 +652,13 @@ for a in &sim.animals {
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!("tick {}", sim.tick_count));
-    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, pending));
-    lines.push(format!("вера {}", sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0)));
+    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, clinics, pending));
+    let max_faith = sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0);
+    lines.push(format!("вера {}  больны {}", max_faith, sick));
+    let plague = sim.towns.iter().any(|t| t.plague_until > 0);
+    if plague {
+        lines.push("☠ ЧУМА! Постройте лечебницу ⛑ и целителей".to_string());
+    }
     let bless_name = match sim
         .towns
         .iter()
@@ -697,7 +723,7 @@ for a in &sim.animals {
     lines.push(format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }));
     lines.push(String::new());
     lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
-    lines.push("1: 🏠  2: ⛲  3: 🏦  4: 🌾  5: ⛪   C: 🐄   R: новый мир".to_string());
+    lines.push("1: 🏠  2: ⛲  3: 🏦  4: 🌾  5: ⛪  6: ⛑   C: 🐄   R: новый мир".to_string());
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.set_stroke_style_str("rgb(70,78,90)");

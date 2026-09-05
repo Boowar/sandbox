@@ -68,6 +68,15 @@ const RITUAL_EVERY: u64 = 600;
 const FAITH_SPEND: f32 = 40.0;
 const BLESS_LEN: f64 = 900.0;
 
+const CLINIC_COST: f32 = 40.0;
+const SICK_MAX: u32 = 200;
+const CONTAGION_CHANCE: f32 = 0.03;
+const CONTAGION_RADIUS: i32 = 4;
+const PLAGUE_CHANCE: f32 = 0.00025;
+const PLAGUE_LEN: u64 = 1500;
+const HEAL_RADIUS: i32 = 3;
+const HEAL_PER_TICK: u32 = 2;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -91,6 +100,7 @@ pub enum Role {
     Miner,
     Hunter,
     Priest,
+    Healer,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -167,6 +177,7 @@ pub enum BuildingKind {
     TradePost,
     Farm,
     Sanctuary,
+    Clinic,
 }
 
 impl BuildingKind {
@@ -177,6 +188,7 @@ impl BuildingKind {
             BuildingKind::TradePost => TRADE_POST_COST,
             BuildingKind::Farm => FARM_COST,
             BuildingKind::Sanctuary => SANCTUARY_COST,
+            BuildingKind::Clinic => CLINIC_COST,
         }
     }
 }
@@ -223,6 +235,7 @@ pub struct Agent {
     pub raider: bool,
     pub target_town: Option<usize>,
     pub role: Role,
+    pub sick: u32,
 }
 
 pub struct Settlement {
@@ -243,6 +256,7 @@ pub struct Settlement {
     pub faith: f32,
     pub blessing: Blessing,
     pub blessing_left: f64,
+    pub plague_until: u64,
 }
 
 pub struct Family {
@@ -528,6 +542,7 @@ impl Sim {
                 faith: 0.0,
                 blessing: Blessing::None,
                 blessing_left: 0.0,
+                plague_until: 0,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -579,6 +594,7 @@ impl Sim {
                     raider: false,
                     target_town: None,
                     role: self.families[family].role,
+                    sick: 0,
                 });
                 self.families[family].members += 1;
                 return;
@@ -600,6 +616,7 @@ impl Sim {
             raider: false,
             target_town: None,
             role: self.families[family].role,
+            sick: 0,
         });
         self.families[family].members += 1;
     }
@@ -953,6 +970,25 @@ impl Sim {
         }
     }
 
+    fn promote_healer(&mut self, ti: usize) {
+        for fid in 0..self.families.len() {
+            if self.families[fid].town != ti || self.families[fid].extinct {
+                continue;
+            }
+            if self.families[fid].role == Role::Worker
+                || self.families[fid].role == Role::Hunter
+            {
+                self.families[fid].role = Role::Healer;
+                for a in self.agents.iter_mut() {
+                    if a.family == fid {
+                        a.role = Role::Healer;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     fn plant_fields(&mut self, cx: i32, cy: i32) {
         let mut cands = Vec::new();
         for dy in -6..=6 {
@@ -1025,6 +1061,9 @@ impl Sim {
                 if k == BuildingKind::Sanctuary {
                     self.promote_priest(ti);
                 }
+                if k == BuildingKind::Clinic {
+                    self.promote_healer(ti);
+                }
                 self.towns[ti].built.push(k);
             }
         }
@@ -1044,8 +1083,10 @@ impl Sim {
             _ => 0.8,
         };
         for a in self.agents.iter_mut() {
-            a.hunger = (a.hunger + hunger_rate).min(140.0);
-            a.thirst = (a.thirst + thirst_rate).min(140.0);
+            let sick_rate = if a.sick > 0 { 1.4 } else { 1.0 };
+            a.hunger = (a.hunger + hunger_rate * sick_rate).min(140.0);
+            let thirst_sick = if a.sick > 0 { 1.3 } else { 1.0 };
+            a.thirst = (a.thirst + thirst_rate * thirst_sick).min(140.0);
         }
 
         if self.tick_count % REGROW_EVERY == 0 {
@@ -1121,6 +1162,8 @@ impl Sim {
         self.caravans_step();
         self.market_buy();
         self.export_caravans();
+        self.plague_step();
+        self.heal_step();
 
         let actions: Vec<(Action, ResourceKind)> = self.agents.iter().map(|a| self.decide(a)).collect();
         let mut dead = Vec::new();
@@ -1476,7 +1519,7 @@ impl Sim {
     }
 
     fn decide(&self, a: &Agent) -> (Action, ResourceKind) {
-        if a.hunger >= STARVE || a.thirst >= STARVE {
+        if a.sick == 0 && (a.hunger >= STARVE || a.thirst >= STARVE) {
             return (Action::Die, a.want);
         }
         if a.raider {
@@ -1591,6 +1634,7 @@ impl Sim {
                 ResourceKind::Gold,
                 st.gold > 5.0 && st.water > 8.0 && st.food > 8.0,
             ),
+            Role::Healer => (need, true),
         };
         if ok && kind != need {
             kind
@@ -1889,6 +1933,87 @@ impl Sim {
 
     fn protected(&self) -> bool {
         self.towns.iter().any(|t| t.blessing == Blessing::Protection)
+    }
+
+    fn plague_step(&mut self) {
+        for ti in 0..self.towns.len() {
+            if self.towns[ti].plague_until > 0 {
+                self.towns[ti].plague_until -= 1;
+                let cure = self.towns[ti].built.iter().any(|b| *b == BuildingKind::Clinic);
+                let chance = if cure { CONTAGION_CHANCE * 0.33 } else { CONTAGION_CHANCE };
+                let mut inf = Vec::new();
+                for j in 0..self.agents.len() {
+                    let a = &self.agents[j];
+                    if a.home != ti || a.sick > 0 {
+                        continue;
+                    }
+                    let near_sick = self.agents.iter().any(|o| {
+                        o.home == ti
+                            && o.sick > 0
+                            && self.cheb(o.x, o.y, a.x, a.y) <= CONTAGION_RADIUS
+                    });
+                    if near_sick && rfrac(&mut self.rng) < chance {
+                        inf.push(j);
+                    }
+                }
+                for j in inf {
+                    self.agents[j].sick = (60 + (rfrac(&mut self.rng) * 140.0) as u32).min(SICK_MAX);
+                }
+            } else {
+                let (cap, at_war, tx, ty) = {
+                    let t = &self.towns[ti];
+                    (t.cap, t.at_war, t.x, t.y)
+                };
+                let crowded = self.pop(ti) >= cap && cap >= 10;
+                let foul = self.weather == Weather::Frost || self.weather == Weather::Rain;
+                if crowded && (foul || at_war) {
+                    let h = self.brain(tx, ty, self.tick_count);
+                    let dice = h % 100000;
+                    if dice < (PLAGUE_CHANCE * 100000.0) as u32 {
+                        self.towns[ti].plague_until = PLAGUE_LEN;
+                        let patient = self
+                            .agents
+                            .iter()
+                            .position(|a| a.home == ti)
+                            .unwrap_or(0);
+                        if patient < self.agents.len() {
+                            self.agents[patient].sick = (60 + (rfrac(&mut self.rng) * 60.0) as u32).min(SICK_MAX);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn heal_step(&mut self) {
+        let mut healed = vec![0u32; self.agents.len()];
+        for i in 0..self.agents.len() {
+            if self.agents[i].role == Role::Healer {
+                for j in 0..self.agents.len() {
+                    if i == j || self.agents[j].sick == 0 {
+                        continue;
+                    }
+                    if self.cheb(self.agents[i].x, self.agents[i].y, self.agents[j].x, self.agents[j].y)
+                        <= HEAL_RADIUS
+                    {
+                        healed[j] += HEAL_PER_TICK;
+                    }
+                }
+            }
+        }
+        for j in 0..self.agents.len() {
+            let base = self.agents[j].home;
+            if self.towns[base].built.iter().any(|b| *b == BuildingKind::Clinic) {
+                healed[j] += 1;
+            }
+            let before = self.agents[j].sick;
+            let sub = healed[j].min(self.agents[j].sick);
+            self.agents[j].sick -= sub;
+            if before > 0 && self.agents[j].sick == 0 {
+                self.agents[j].hunger = (self.agents[j].hunger * 0.55).max(0.0);
+                self.agents[j].thirst = (self.agents[j].thirst * 0.6).max(0.0);
+            }
+        }
     }
 
     fn reproduction(&mut self) {
@@ -2968,6 +3093,75 @@ mod tests {
             s.agents.iter().any(|a| a.role == Role::Priest),
             "priest agents should exist"
         );
+    }
+
+    #[test]
+    fn clinic_ordains_healer() {
+        let mut s = Sim::new(84);
+        s.towns[0].queue.push((BuildingKind::Clinic, CLINIC_COST - 1.0));
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0 };
+        for _ in 0..220 {
+            s.tick();
+        }
+        assert!(
+            s.towns[0].built.iter().any(|b| *b == BuildingKind::Clinic),
+            "clinic should be built"
+        );
+        assert!(
+            s.agents.iter().any(|a| a.role == Role::Healer),
+            "clinic should ordain healers (have {:?})",
+            s.towns[0].built
+        );
+    }
+
+    #[test]
+    fn plague_breaks_in_crowded_cold_town() {
+        let mut s = Sim::new(85);
+        s.weather = Weather::Frost;
+        s.towns[0].cap = 10;
+        while s.agents.iter().filter(|a| a.home == 0).count() < 10 {
+            s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 0, false);
+        }
+        let mut outbreak = false;
+        for _ in 0..30000 {
+            s.tick_count += 1;
+            s.plague_step();
+            if s.towns[0].plague_until > 0 {
+                outbreak = true;
+                break;
+            }
+        }
+        assert!(outbreak, "a crowded frost town should eventually fall ill");
+    }
+
+    #[test]
+    fn healer_cures_sick_agent() {
+        let mut s = Sim::new(86);
+        s.agents.clear();
+        s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 0, false);
+        s.agents[0].role = Role::Healer;
+        s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 0, false);
+        s.agents[1].x = s.agents[0].x;
+        s.agents[1].y = s.agents[0].y;
+        s.agents[1].sick = 200;
+        for _ in 0..200 {
+            s.heal_step();
+        }
+        assert_eq!(s.agents[1].sick, 0, "healer should cure a sick neighbor");
+    }
+
+    #[test]
+    fn sick_agent_wanders_and_heals_with_clinic() {
+        let mut s = Sim::new(87);
+        s.agents.retain(|a| a.home == 0);
+        s.agents[0].home = 0;
+        s.agents[0].sick = 50;
+        s.towns[0].built.push(BuildingKind::Clinic);
+        let _ = s.wander(&s.agents[0]);
+        for _ in 0..60 {
+            s.heal_step();
+        }
+        assert_eq!(s.agents[0].sick, 0, "clinic should slowly cure residents");
     }
 
     #[test]
