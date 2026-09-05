@@ -58,6 +58,10 @@ const BUY_WATER_AT: f32 = 8.0;
 const BUY_ORE_AT: f32 = 5.0;
 const BUY_MEAT_AT: f32 = 6.0;
 
+const FARM_COST: f32 = 30.0;
+const FARM_PATCH: usize = 16;
+const FARM_FOOD_MAX: f32 = 8.0;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -91,12 +95,17 @@ pub enum Terrain {
     Forest,
     Hills,
     Water,
+    Farm,
 }
 
 impl Terrain {
     fn walkable(self) -> bool {
         !matches!(self, Terrain::Water)
     }
+}
+
+fn is_food_source(c: &Cell) -> bool {
+    c.terrain == Terrain::Forest || c.terrain == Terrain::Farm
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -141,6 +150,7 @@ pub enum BuildingKind {
     House,
     Well,
     TradePost,
+    Farm,
 }
 
 impl BuildingKind {
@@ -149,6 +159,7 @@ impl BuildingKind {
             BuildingKind::House => HOUSE_COST,
             BuildingKind::Well => WELL_COST,
             BuildingKind::TradePost => TRADE_POST_COST,
+            BuildingKind::Farm => FARM_COST,
         }
     }
 }
@@ -345,7 +356,7 @@ impl Sim {
                                 Terrain::Water => water += 1,
                                 Terrain::Forest => tree += 1,
                                 Terrain::Hills => hill += 1,
-                                Terrain::Grass => {}
+                                Terrain::Farm | Terrain::Grass => {}
                             }
                         }
                     }
@@ -359,6 +370,7 @@ impl Sim {
                         Terrain::Hills => {
                             if hill >= 2 && water < 4 { Terrain::Hills } else { Terrain::Grass }
                         }
+                        Terrain::Farm => Terrain::Grass,
                         Terrain::Grass => {
                             if water >= 4 {
                                 Terrain::Water
@@ -892,8 +904,38 @@ impl Sim {
                         c.food = FOOD_MAX;
                     }
                     Terrain::Forest => c.food = FOOD_MAX,
-                    Terrain::Hills | Terrain::Water => {}
+                    Terrain::Farm | Terrain::Hills | Terrain::Water => {}
                 }
+            }
+        }
+    }
+
+    fn plant_fields(&mut self, cx: i32, cy: i32) {
+        let mut cands = Vec::new();
+        for dy in -6..=6 {
+            for dx in -6..=6 {
+                let x = cx + dx;
+                let y = cy + dy;
+                if !in_bounds(x, y) {
+                    continue;
+                }
+                let c = &self.grid[idx(x, y)];
+                if c.terrain == Terrain::Grass {
+                    cands.push((x, y));
+                }
+            }
+        }
+        cands.sort_by_key(|(x, y)| (x - cx).abs().max(y - cy));
+        let mut made = 0;
+        for (x, y) in cands {
+            if made >= FARM_PATCH {
+                break;
+            }
+            let c = &mut self.grid[idx(x, y)];
+            if c.terrain == Terrain::Grass {
+                c.terrain = Terrain::Farm;
+                c.food = FARM_FOOD_MAX;
+                made += 1;
             }
         }
     }
@@ -927,11 +969,17 @@ impl Sim {
                 }
             };
             if let Some(k) = apply {
-                let t = &mut self.towns[ti];
-                t.built.push(k);
                 if k == BuildingKind::House {
-                    t.cap += HOUSE_CAP_BONUS;
+                    self.towns[ti].cap += HOUSE_CAP_BONUS;
                 }
+                if k == BuildingKind::Farm {
+                    let (x, y) = {
+                        let t = &self.towns[ti];
+                        (t.x, t.y)
+                    };
+                    self.plant_fields(x, y);
+                }
+                self.towns[ti].built.push(k);
             }
         }
     }
@@ -960,11 +1008,17 @@ impl Sim {
                 Weather::Frost => 0.5,
                 _ => 1.0,
             };
+            let crop = match self.weather {
+                Weather::Rain => 3.0,
+                Weather::Frost => 1.5,
+                _ => 2.5,
+            };
             for cell in self.grid.iter_mut() {
-                if cell.terrain == Terrain::Forest {
-                    cell.food = (cell.food + berry).min(FOOD_MAX);
-                } else if cell.terrain == Terrain::Hills {
-                    cell.ore = (cell.ore + 0.5).min(ORE_MAX);
+                match cell.terrain {
+                    Terrain::Forest => cell.food = (cell.food + berry).min(FOOD_MAX),
+                    Terrain::Farm => cell.food = (cell.food + crop).min(FARM_FOOD_MAX),
+                    Terrain::Hills => cell.ore = (cell.ore + 0.5).min(ORE_MAX),
+                    _ => {}
                 }
             }
         }
@@ -1506,7 +1560,7 @@ impl Sim {
     fn food_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
         self.seek(x, y, |s, nx, ny| {
             let c = &s.grid[idx(nx, ny)];
-            c.terrain == Terrain::Forest && c.food > 0.5
+            is_food_source(c) && c.food > 0.5
         })
     }
 
@@ -1676,7 +1730,7 @@ impl Sim {
                         match a.want {
                             ResourceKind::Food => {
                                 let c = &self.grid[idx(nx, ny)];
-                                if c.terrain == Terrain::Forest && c.food > 0.5 {
+                                if is_food_source(c) && c.food > 0.5 {
                                     self.grid[idx(nx, ny)].food -= 1.0;
                                     a.carry = Some((ResourceKind::Food, 2.0));
                                 }
@@ -2249,7 +2303,7 @@ mod tests {
                     Terrain::Forest => forest += 1,
                     Terrain::Water => water += 1,
                     Terrain::Hills => hills += 1,
-                    Terrain::Grass => {}
+                    Terrain::Grass | Terrain::Farm => {}
                 }
             }
             let n = (W * H) as f64;
@@ -2757,6 +2811,75 @@ mod tests {
             "trade post should earn trickle gold ({} -> {})",
             g0,
             s.towns[0].stocks.gold
+        );
+    }
+
+    #[test]
+    fn farm_building_creates_field_cells() {
+        let mut s = Sim::new(70);
+        s.plant_fields(s.towns[0].x, s.towns[0].y);
+        let made = s
+            .grid
+            .iter()
+            .filter(|c| c.terrain == Terrain::Farm)
+            .count();
+        assert!(
+            made >= FARM_PATCH,
+            "farm should carve a field patch (made {})",
+            made
+        );
+    }
+
+    #[test]
+    fn farm_feeds_town_without_forest() {
+        let mut s = Sim::new(71);
+        for c in s.grid.iter_mut() {
+            c.food = 0.0;
+            if c.terrain == Terrain::Forest {
+                c.terrain = Terrain::Grass;
+            }
+        }
+        s.agents.clear();
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.towns[0].stocks = Stock { food: 5.0, water: 200.0, ore: 100.0, meat: 0.0, gold: 0.0 };
+        s.plant_fields(tx, ty);
+        for k in 0..6 {
+            s.spawn_agent(0, tx, ty, k % 2, false);
+        }
+        s.families[0].role = Role::Farmer;
+        s.families[1].role = Role::Farmer;
+        for a in s.agents.iter_mut() {
+            a.role = Role::Farmer;
+        }
+        let mut done = false;
+        for _ in 0..3000 {
+            s.tick();
+            if s.towns[0].stocks.food > 20.0 {
+                done = true;
+                break;
+            }
+        }
+        assert!(done, "farm should sustain a growing food stock");
+    }
+
+    #[test]
+    fn farm_field_regrows_after_harvest() {
+        let mut s = Sim::new(72);
+        s.plant_fields(s.towns[0].x, s.towns[0].y);
+        let fidx = s
+            .grid
+            .iter()
+            .position(|c| c.terrain == Terrain::Farm)
+            .unwrap();
+        s.grid[fidx].food = 0.5;
+        for _ in 0..23 {
+            s.tick();
+        }
+        assert!(
+            s.grid[fidx].food > 0.5,
+            "farm food should regrow ({} -> {})",
+            0.5,
+            s.grid[fidx].food
         );
     }
 

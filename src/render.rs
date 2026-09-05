@@ -91,6 +91,15 @@ fn paint_hills(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     }
 }
 
+fn paint_farm(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 158, 140, 80);
+    let h = hash2(x, y);
+    fill(buf, ax, ay, ART, 1, 128, 112, 62);
+    fill(buf, ax, ay + 3, ART, 1, 128, 112, 62);
+    set_px(buf, ax + (h >> 3) as usize % 4, ay + ((h >> 5) % 2) as usize, 96, 84, 44);
+    set_px(buf, ax + (h >> 7) as usize % 4, ay + 2 + ((h >> 9) % 2) as usize, 230, 214, 130);
+}
+
 pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
     let mut buf = vec![0u8; PW * PH * 4];
     for y in 0..H {
@@ -101,6 +110,7 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
                 Terrain::Grass => paint_grass(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Forest => paint_forest(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Hills => paint_hills(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Farm => paint_farm(&mut buf, ax, ay, x as i32, y as i32),
             }
         }
     }
@@ -231,6 +241,15 @@ fn draw_building(
             ctx.fill_rect(px, py + 3.0, 6.0, 1.0);
             ctx.set_fill_style_str("rgb(92,74,44)");
             ctx.fill_rect(px + 1.0, py + 2.0, 4.0, 2.0);
+        }
+        crate::sim::BuildingKind::Farm => {
+            ctx.set_fill_style_str("rgb(158,140,80)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 2.0);
+            ctx.set_fill_style_str("rgb(128,112,62)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 1.0);
+            ctx.set_fill_style_str("rgb(230,214,130)");
+            ctx.fill_rect(px + 1.0, py + 3.0, 1.0, 1.0);
+            ctx.fill_rect(px + 4.0, py + 3.0, 1.0, 1.0);
         }
     }
 }
@@ -575,6 +594,16 @@ for a in &sim.animals {
         .iter()
         .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Well).count())
         .sum();
+    let farms: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Farm).count())
+        .sum();
+    let posts: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::TradePost).count())
+        .sum();
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let dynasty = sim.families.iter().filter(|f| !f.extinct).count();
     let extinct = sim.families.len() - dynasty;
@@ -588,7 +617,7 @@ for a in &sim.animals {
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!("tick {}", sim.tick_count));
-    lines.push(format!("pop {}  houses {}  wells {}  in_queue {}", sim.agents.len(), houses, wells, pending));
+    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, pending));
     for (i, t) in sim.towns.iter().enumerate() {
         let ruler = sim
             .families
@@ -639,7 +668,7 @@ for a in &sim.animals {
     lines.push(format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }));
     lines.push(String::new());
     lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
-    lines.push("1: 🏠  2: ⛲  3: 🏦 пост  C: 🐄  R: новый мир".to_string());
+    lines.push("1: 🏠  2: ⛲  3: 🏦 пост  4: 🌾 ферма  C: 🐄  R: новый мир".to_string());
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.set_stroke_style_str("rgb(70,78,90)");
