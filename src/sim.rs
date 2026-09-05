@@ -77,6 +77,12 @@ const PLAGUE_LEN: u64 = 1500;
 const HEAL_RADIUS: i32 = 3;
 const HEAL_PER_TICK: u32 = 2;
 
+const WALL_COST: f32 = 50.0;
+const BARRACKS_COST: f32 = 45.0;
+const DEFENSE_BASE: f32 = 0.3;
+const DEFENSE_WALL_BONUS: f32 = 0.15;
+const DEFENSE_BARRACKS_BONUS: f32 = 0.2;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -101,6 +107,7 @@ pub enum Role {
     Hunter,
     Priest,
     Healer,
+    Guard,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -178,6 +185,8 @@ pub enum BuildingKind {
     Farm,
     Sanctuary,
     Clinic,
+    Wall,
+    Barracks,
 }
 
 impl BuildingKind {
@@ -189,6 +198,8 @@ impl BuildingKind {
             BuildingKind::Farm => FARM_COST,
             BuildingKind::Sanctuary => SANCTUARY_COST,
             BuildingKind::Clinic => CLINIC_COST,
+            BuildingKind::Wall => WALL_COST,
+            BuildingKind::Barracks => BARRACKS_COST,
         }
     }
 }
@@ -989,6 +1000,24 @@ impl Sim {
         }
     }
 
+    fn promote_guard(&mut self, ti: usize) {
+        for fid in 0..self.families.len() {
+            if self.families[fid].town != ti || self.families[fid].extinct {
+                continue;
+            }
+            if self.families[fid].role == Role::Priest || self.families[fid].role == Role::Healer {
+                continue;
+            }
+            self.families[fid].role = Role::Guard;
+            for a in self.agents.iter_mut() {
+                if a.family == fid {
+                    a.role = Role::Guard;
+                }
+            }
+            break;
+        }
+    }
+
     fn plant_fields(&mut self, cx: i32, cy: i32) {
         let mut cands = Vec::new();
         for dy in -6..=6 {
@@ -1063,6 +1092,9 @@ impl Sim {
                 }
                 if k == BuildingKind::Clinic {
                     self.promote_healer(ti);
+                }
+                if k == BuildingKind::Barracks {
+                    self.promote_guard(ti);
                 }
                 self.towns[ti].built.push(k);
             }
@@ -1635,6 +1667,7 @@ impl Sim {
                 st.gold > 5.0 && st.water > 8.0 && st.food > 8.0,
             ),
             Role::Healer => (need, true),
+            Role::Guard => (need, need != ResourceKind::Meat),
         };
         if ok && kind != need {
             kind
@@ -2200,6 +2233,21 @@ impl Sim {
         }
     }
 
+    fn defense_bonus(&self, ti: usize) -> f32 {
+        let mut b = DEFENSE_BASE;
+        for k in self.towns[ti].built.iter() {
+            match k {
+                BuildingKind::Wall => b += DEFENSE_WALL_BONUS,
+                BuildingKind::Barracks => b += DEFENSE_BARRACKS_BONUS,
+                _ => {}
+            }
+        }
+        if self.towns[ti].blessing == Blessing::Protection {
+            b += 0.15;
+        }
+        b
+    }
+
     fn combat_check(&mut self, i: usize) {
         let (my_x, my_y) = {
             let a = &self.agents[i];
@@ -2232,7 +2280,14 @@ impl Sim {
                 continue;
             }
             if (foe.2 - my_x).abs() <= 1 && (foe.3 - my_y).abs() <= 1 {
-                if rfrac(&mut self.rng) < 0.3 {
+                let def = self.defense_bonus(j);
+                let guard = self
+                    .agents
+                    .iter()
+                    .filter(|g| g.home == j && g.role == Role::Guard)
+                    .count() as f32;
+                let kill_chance = (def + guard * 0.04).min(0.85);
+                if rfrac(&mut self.rng) < kill_chance {
                     self.agents[k].hunger = STARVE;
                 }
                 return;
@@ -3022,6 +3077,34 @@ mod tests {
             "trade post should earn trickle gold ({} -> {})",
             g0,
             s.towns[0].stocks.gold
+        );
+    }
+
+    #[test]
+    fn wall_raises_defense_bonus() {
+        let mut s = Sim::new(88);
+        let d0 = s.defense_bonus(0);
+        s.towns[0].built.push(BuildingKind::Wall);
+        s.towns[0].built.push(BuildingKind::Barracks);
+        let d1 = s.defense_bonus(0);
+        assert!(d1 > d0, "walls and barracks should strengthen defense ({} -> {})", d0, d1);
+    }
+
+    #[test]
+    fn barracks_ordains_guard() {
+        let mut s = Sim::new(89);
+        s.towns[0].queue.push((BuildingKind::Barracks, BARRACKS_COST - 1.0));
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 80.0, meat: 15.0, gold: 0.0 };
+        for _ in 0..250 {
+            s.tick();
+        }
+        assert!(
+            s.towns[0].built.iter().any(|b| *b == BuildingKind::Barracks),
+            "barracks should be built"
+        );
+        assert!(
+            s.agents.iter().any(|a| a.role == Role::Guard),
+            "barracks should train guards"
         );
     }
 
