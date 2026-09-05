@@ -938,33 +938,6 @@ for a in &sim.animals {
         line_colors.push(Some((cr, cg, cb)));
         town_rows.push((row, i));
     }
-    let empires_line = sim
-        .empires
-        .iter()
-        .filter(|e| !e.members.is_empty())
-        .map(|e| format!("{} ({} городов)", e.name, e.members.len()))
-        .collect::<Vec<_>>()
-        .join("   ");
-    if !empires_line.is_empty() {
-        lines.push(format!("империи: {}", empires_line));
-    }
-    let (mut deer, mut boar, mut wolf, mut cow) = (0, 0, 0, 0);
-    for a in &sim.animals {
-        match a.species {
-            Species::Deer => deer += 1,
-            Species::Boar => boar += 1,
-            Species::Wolf => wolf += 1,
-            Species::Cow => cow += 1,
-        }
-    }
-    lines.push(format!(
-        "animals deer {}  boar {}  wolf {}  cow {}  (herds {})",
-        deer, boar, wolf, cow,
-        sim.animals
-            .iter()
-            .filter(|a| a.species == Species::Cow && a.home.is_some())
-            .count()
-    ));
     let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
     let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
     lines.push(format!("💰 {}g  🐫 caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
