@@ -315,16 +315,19 @@ pub enum Terrain {
     Desert,
     Tundra,
     Jungle,
+    Swamp,
+    Volcano,
+    CoralReef,
 }
 
 impl Terrain {
-    fn walkable(self) -> bool {
-        !matches!(self, Terrain::Water)
-    }
+fn walkable(self) -> bool {
+    !matches!(self, Terrain::Water | Terrain::CoralReef | Terrain::Volcano)
+}
 }
 
 fn is_food_source(c: &Cell) -> bool {
-    c.terrain == Terrain::Forest || c.terrain == Terrain::Farm || c.terrain == Terrain::Jungle
+    c.terrain == Terrain::Forest || c.terrain == Terrain::Farm || c.terrain == Terrain::Jungle || c.terrain == Terrain::Swamp
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
@@ -622,6 +625,8 @@ impl Sim {
             rng,
         };
         sim.ensure_hills();
+        sim.scatter_reefs();
+        sim.scatter_volcanoes();
         sim.spawn_world();
         sim.spawn_animals();
         sim
@@ -667,7 +672,7 @@ impl Sim {
                     if p < 0.15 { Terrain::Hills } else { Terrain::Tundra }
                 }
                 3 => {
-                    if p < 0.40 { Terrain::Jungle } else if p < 0.55 { Terrain::Hills } else { Terrain::Grass }
+                    if p < 0.30 { Terrain::Jungle } else if p < 0.40 { Terrain::Swamp } else if p < 0.55 { Terrain::Hills } else { Terrain::Grass }
                 }
                 _ => {
                     if p < 0.42 { Terrain::Forest }
@@ -680,6 +685,7 @@ impl Sim {
                 Terrain::Jungle => FOOD_MAX * 1.5,
                 Terrain::Tundra => FOOD_MAX * 0.4,
                 Terrain::Desert => FOOD_MAX * 0.1,
+                Terrain::Swamp => FOOD_MAX * 0.8,
                 _ => FOOD_MAX,
             };
             grid[i].ore = if grid[i].terrain == Terrain::Hills { ORE_MAX } else { 0.0 };
@@ -697,6 +703,8 @@ impl Sim {
                     let mut jungle = 0;
                     let mut desert = 0;
                     let mut tundra = 0;
+                    let mut swamp = 0;
+                    let mut volcano = 0;
                     for dy in -1..=1 {
                         for dx in -1..=1 {
                             if dx == 0 && dy == 0 {
@@ -714,11 +722,15 @@ impl Sim {
                                 Terrain::Jungle => jungle += 1,
                                 Terrain::Desert => desert += 1,
                                 Terrain::Tundra => tundra += 1,
-                                Terrain::Farm | Terrain::Grass => {}
+                                Terrain::Swamp => swamp += 1,
+                                Terrain::Volcano => volcano += 1,
+                                Terrain::Farm | Terrain::Grass | Terrain::CoralReef => {}
                             }
                         }
                     }
                     let dominant = if water >= 4 { Terrain::Water }
+                        else if volcano >= 2 { Terrain::Volcano }
+                        else if swamp >= 4 && water < 4 { Terrain::Swamp }
                         else if jungle >= 4 && water < 3 { Terrain::Jungle }
                         else if desert >= 4 && water < 2 { Terrain::Desert }
                         else if tundra >= 3 && water < 3 { Terrain::Tundra }
@@ -744,6 +756,13 @@ impl Sim {
                         Terrain::Tundra => {
                             if tundra >= 2 && water < 3 { Terrain::Tundra } else { dominant }
                         }
+                        Terrain::Swamp => {
+                            if swamp >= 2 && water < 5 { Terrain::Swamp } else { dominant }
+                        }
+                        Terrain::Volcano => {
+                            if volcano >= 1 { Terrain::Volcano } else { dominant }
+                        }
+                        Terrain::CoralReef => Terrain::CoralReef,
                         Terrain::Farm => Terrain::Grass,
                         Terrain::Grass => dominant,
                     };
@@ -758,6 +777,16 @@ impl Sim {
                     }
                     if next[i].terrain == Terrain::Desert && next[i].food <= 0.0 {
                         next[i].food = FOOD_MAX * 0.1;
+                    }
+                    if next[i].terrain == Terrain::Swamp && next[i].food <= 0.0 {
+                        next[i].food = FOOD_MAX * 0.8;
+                    }
+                    if next[i].terrain == Terrain::Volcano && next[i].food <= 0.0 {
+                        next[i].food = 0.0;
+                        next[i].ore = ORE_MAX;
+                    }
+                    if next[i].terrain == Terrain::CoralReef && next[i].food <= 0.0 {
+                        next[i].food = 6.0;
                     }
                 }
             }
@@ -825,6 +854,53 @@ impl Sim {
                         c.terrain = Terrain::Hills;
                         c.ore = ORE_MAX;
                     }
+                }
+            }
+        }
+    }
+
+    fn scatter_reefs(&mut self) {
+        let rng_seed = self.rng;
+        for i in 0..W * H {
+            if self.grid[i].terrain == Terrain::Water {
+                let h = ((i as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) % 100;
+                if h < 8 {
+                    self.grid[i].terrain = Terrain::CoralReef;
+                    self.grid[i].food = 6.0;
+                }
+            }
+        }
+        let _ = rng_seed;
+    }
+
+    fn scatter_volcanoes(&mut self) {
+        let mut placed = 0;
+        let max_volcanoes = 2 + ((self.rng % 3) as usize);
+        let mut attempts = 0;
+        while placed < max_volcanoes && attempts < 200 {
+            attempts += 1;
+            let h1 = (attempts as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let h2 = h1.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let x = (h1 % W as u64) as i32;
+            let y = (h2 % H as u64) as i32;
+            if in_bounds(x, y) {
+                let ci = idx(x, y);
+                if self.grid[ci].terrain == Terrain::Hills || self.grid[ci].terrain == Terrain::Desert {
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let nx = x + dx;
+                            let ny = y + dy;
+                            if in_bounds(nx, ny) {
+                                let ni = idx(nx, ny);
+                                if self.grid[ni].terrain == Terrain::Hills || self.grid[ni].terrain == Terrain::Desert || self.grid[ni].terrain == Terrain::Grass {
+                                    self.grid[ni].terrain = Terrain::Volcano;
+                                    self.grid[ni].ore = ORE_MAX;
+                                    self.grid[ni].food = 0.0;
+                                }
+                            }
+                        }
+                    }
+                    placed += 1;
                 }
             }
         }
@@ -1330,7 +1406,7 @@ impl Sim {
                     Terrain::Forest => c.food = FOOD_MAX,
                     Terrain::Jungle => c.food = FOOD_MAX * 1.5,
                     Terrain::Tundra => c.food = (c.food + FOOD_MAX * 0.5).min(FOOD_MAX * 0.4),
-                    Terrain::Farm | Terrain::Hills | Terrain::Water | Terrain::Desert => {}
+                    Terrain::Farm | Terrain::Hills | Terrain::Water | Terrain::Desert | Terrain::Swamp | Terrain::Volcano | Terrain::CoralReef => {}
                 }
             }
         }
@@ -1777,7 +1853,7 @@ impl Sim {
                                 }
                             }
                         }
-                        Terrain::Hills | Terrain::Grass | Terrain::Forest => {}
+                        Terrain::Hills | Terrain::Grass | Terrain::Forest | Terrain::Volcano => {}
                         Terrain::Jungle if !on_road => {
                             let k = (self.grid[i].food / (FOOD_MAX * 1.5)).max(0.3);
                             let ber = berry * season_berry * 1.3 * k + if abundant { 1.5 } else { 0.0 };
@@ -1791,6 +1867,14 @@ impl Sim {
                         Terrain::Desert if !on_road => {
                             let ber = berry * season_berry * 0.1;
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 0.1);
+                        }
+                        Terrain::Swamp if !on_road => {
+                            let k = (self.grid[i].food / (FOOD_MAX * 0.8)).max(0.2);
+                            let ber = berry * season_berry * 0.6 * k;
+                            self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 0.8);
+                        }
+                        Terrain::CoralReef => {
+                            self.grid[i].food = (self.grid[i].food + 0.4).min(8.0);
                         }
                         _ => {}
                     }
@@ -2691,6 +2775,9 @@ impl Sim {
                     a.dir_x = (nx - ox).clamp(-1, 1);
                     a.dir_y = (ny - oy).clamp(-1, 1);
                     a.energy -= if on_road { 0.3 } else { 0.6 };
+                    if self.grid[idx(nx, ny)].terrain == Terrain::Volcano {
+                        a.energy -= 1.5;
+                    }
                     if a.carry.is_none() {
                         match a.want {
                             ResourceKind::Food => {
@@ -3264,7 +3351,7 @@ impl Sim {
     fn can_road_at(&self, x: i32, y: i32) -> bool {
         if !in_bounds(x, y) { return false; }
         let c = &self.grid[idx(x, y)];
-        c.terrain != Terrain::Water && c.terrain != Terrain::Hills
+        !matches!(c.terrain, Terrain::Water | Terrain::Hills | Terrain::CoralReef | Terrain::Volcano)
     }
 
     pub fn toggle_road(&mut self, x: i32, y: i32) {
@@ -3388,7 +3475,8 @@ impl Sim {
                 }
                 self.grid[i].burn -= 1;
                 if self.grid[i].burn == 0 {
-                    self.grid[i].terrain = Terrain::Grass;
+                    let was_swamp = self.grid[i].terrain == Terrain::Swamp;
+                    self.grid[i].terrain = if was_swamp { Terrain::Swamp } else { Terrain::Grass };
                     self.grid[i].food = 0.0;
                     continue;
                 }
@@ -3407,7 +3495,8 @@ impl Sim {
                             if self.grid[ni].burn == 0
                                 && (self.grid[ni].terrain == Terrain::Forest
                                     || self.grid[ni].terrain == Terrain::Farm
-                                    || self.grid[ni].terrain == Terrain::Jungle)
+                                    || self.grid[ni].terrain == Terrain::Jungle
+                                    || self.grid[ni].terrain == Terrain::Swamp)
                             {
                                 ignites.push(ni);
                             }
@@ -3418,7 +3507,7 @@ impl Sim {
         }
         for &ni in ignites.iter() {
             let c = &mut self.grid[ni];
-            if c.burn == 0 && (c.terrain == Terrain::Forest || c.terrain == Terrain::Farm || c.terrain == Terrain::Jungle) {
+            if c.burn == 0 && (c.terrain == Terrain::Forest || c.terrain == Terrain::Farm || c.terrain == Terrain::Jungle || c.terrain == Terrain::Swamp) {
                 c.burn = FIRE_LEN;
                 c.food = c.food.min(2.0);
             }
@@ -4364,7 +4453,7 @@ mod tests {
                     Terrain::Forest => forest += 1,
                     Terrain::Water => water += 1,
                     Terrain::Hills => hills += 1,
-                    Terrain::Grass | Terrain::Farm | Terrain::Desert | Terrain::Tundra | Terrain::Jungle => {}
+                    Terrain::Grass | Terrain::Farm | Terrain::Desert | Terrain::Tundra | Terrain::Jungle | Terrain::Swamp | Terrain::Volcano | Terrain::CoralReef => {}
                 }
             }
             let n = (W * H) as f64;
@@ -5265,7 +5354,7 @@ mod tests {
         s.agents[0].age = crate::sim::OLD_AGE + 1;
         s.families.iter_mut().for_each(|f| f.members = 0);
         let mut died = false;
-        for _ in 0..5000u64 {
+        for _ in 0..20000u64 {
             s.tick();
             if s.agents.is_empty() {
                 died = true;

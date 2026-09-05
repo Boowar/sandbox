@@ -97,6 +97,9 @@ impl App {
                             sim::Terrain::Jungle => { sim.grid[i].food = 15.0; sim.grid[i].ore = 0.0; }
                             sim::Terrain::Grass => { sim.grid[i].food = 10.0; sim.grid[i].ore = 0.0; }
                             sim::Terrain::Farm => {}
+                            sim::Terrain::Swamp => { sim.grid[i].food = 8.0; sim.grid[i].ore = 0.0; }
+                            sim::Terrain::Volcano => { sim.grid[i].food = 0.0; sim.grid[i].ore = 60.0; }
+                            sim::Terrain::CoralReef => { sim.grid[i].food = 6.0; sim.grid[i].ore = 0.0; }
                         }
                         self.effects.push(render::Fx {
                             x: x as f64 * CELL + CELL / 2.0,
@@ -234,9 +237,12 @@ impl App {
             sim::Terrain::Water => sim::Terrain::Desert,
             sim::Terrain::Desert => sim::Terrain::Tundra,
             sim::Terrain::Tundra => sim::Terrain::Jungle,
-            sim::Terrain::Jungle => sim::Terrain::Grass,
+            sim::Terrain::Jungle => sim::Terrain::Swamp,
+            sim::Terrain::Swamp => sim::Terrain::Grass,
             sim::Terrain::Grass => sim::Terrain::Forest,
             sim::Terrain::Farm => sim::Terrain::Forest,
+            sim::Terrain::Volcano => sim::Terrain::Grass,
+            sim::Terrain::CoralReef => sim::Terrain::Water,
         };
         self.sync_ui();
     }

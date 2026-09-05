@@ -191,6 +191,48 @@ fn paint_jungle(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     }
 }
 
+fn paint_swamp(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 55, 85, 45);
+    let h = hash2(x, y);
+    fill(buf, ax + (h % 2) as usize, ay, 3, 2, 45, 75, 50);
+    set_px(buf, ax + (h >> 3) as usize % 4, ay + (h >> 5) as usize % 4, 65, 95, 55);
+    if (h >> 7) % 3 == 0 {
+        set_px(buf, ax + (h >> 9) as usize % 4, ay + (h >> 11) as usize % 4, 80, 110, 60);
+    }
+    if (h >> 13) % 5 == 0 {
+        set_px(buf, ax + (h >> 15) as usize % 3, ay + (h >> 17) as usize % 3, 120, 90, 40);
+    }
+    if (h >> 19) % 4 == 0 {
+        set_px(buf, ax + (h >> 21) as usize % 4, ay + (h >> 23) as usize % 4, 30, 100, 40);
+    }
+}
+
+fn paint_volcano(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 60, 50, 55);
+    let h = hash2(x, y);
+    fill(buf, ax + (h % 2) as usize, ay, 3, 2, 80, 40, 30);
+    set_px(buf, ax + (h >> 3) as usize % 4, ay + (h >> 5) as usize % 4, 100, 50, 35);
+    if (h >> 7) % 3 == 0 {
+        set_px(buf, ax + (h >> 9) as usize % 4, ay + (h >> 11) as usize % 4, 200, 100, 40);
+    }
+    if (h >> 13) % 4 == 0 {
+        set_px(buf, ax + (h >> 15) as usize % 3, ay + (h >> 17) as usize % 3, 255, 160, 50);
+    }
+}
+
+fn paint_coral_reef(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 30, 100, 150);
+    let h = hash2(x, y);
+    fill(buf, ax + (h % 2) as usize, ay, 3, 2, 40, 120, 170);
+    set_px(buf, ax + (h >> 3) as usize % 4, ay + (h >> 5) as usize % 4, 220, 130, 100);
+    if (h >> 7) % 3 == 0 {
+        set_px(buf, ax + (h >> 9) as usize % 4, ay + (h >> 11) as usize % 4, 240, 160, 120);
+    }
+    if (h >> 13) % 4 == 0 {
+        set_px(buf, ax + (h >> 15) as usize % 3, ay + (h >> 17) as usize % 3, 200, 180, 140);
+    }
+}
+
 pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
     let mut buf = vec![0u8; PW * PH * 4];
     for y in 0..H {
@@ -205,6 +247,9 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
                 Terrain::Desert => paint_desert(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Tundra => paint_tundra(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Jungle => paint_jungle(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Swamp => paint_swamp(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Volcano => paint_volcano(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::CoralReef => paint_coral_reef(&mut buf, ax, ay, x as i32, y as i32),
             }
         }
     }
