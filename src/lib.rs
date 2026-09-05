@@ -570,6 +570,7 @@ impl App {
             "6" => self.build(sim::BuildingKind::Clinic),
             "7" => self.build(sim::BuildingKind::Wall),
             "8" => self.build(sim::BuildingKind::Barracks),
+            "t" | "T" | "е" | "Е" => self.build(sim::BuildingKind::Temple),
             "9" => self.build(sim::BuildingKind::University),
             "0" => self.build(sim::BuildingKind::Smithy),
             "q" | "Q" | "й" | "Й" => self.build(sim::BuildingKind::Library),
@@ -837,6 +838,9 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnBarracks").ok_or("no btnBarracks")?, &app, |a| {
         a.build(sim::BuildingKind::Barracks)
+    })?;
+    bind_click(&document.get_element_by_id("btnTemple").ok_or("no btnTemple")?, &app, |a| {
+        a.build(sim::BuildingKind::Temple)
     })?;
     bind_click(&document.get_element_by_id("btnCow").ok_or("no btnCow")?, &app, |a| {
         a.breed_cows()

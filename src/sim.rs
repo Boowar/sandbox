@@ -133,6 +133,7 @@ const DEV_SCHOLAR_BONUS: f32 = 1.0;
 const UNIVERSITY_COST: f32 = 70.0;
 const SMITHY_COST: f32 = 85.0;
 const LIBRARY_COST: f32 = 110.0;
+const TEMPLE_COST: f32 = 150.0;
 
 pub const CHILD_AGE: u32 = 90;
 pub const OLD_AGE: u32 = 24000;
@@ -186,6 +187,7 @@ pub enum Role {
     Guard,
     Scholar,
     Builder,
+    Prophet,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
@@ -195,9 +197,36 @@ pub enum Blessing {
     Abundance,
     Protection,
 }
+
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+pub enum Prophecy {
+    None,
+    Harvest,
+    Rain,
+    PlagueWarning,
+    HolyWar,
+    Prosperity,
+}
+
+impl Prophecy {
+    pub fn name(self) -> &'static str {
+        match self {
+            Prophecy::None => "",
+            Prophecy::Harvest => "урожай",
+            Prophecy::Rain => "дождь",
+            Prophecy::PlagueWarning => "чума",
+            Prophecy::HolyWar => "священная война",
+            Prophecy::Prosperity => "процветание",
+        }
+    }
+}
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
 const WELL_WATER_PER_TICK: f32 = 1.0;
+
+const REVELATION_PER_TICK: f32 = 0.03;
+const PROPHECY_COST: f32 = 50.0;
+const PROPHECY_LEN: f32 = 1200.0;
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Terrain {
@@ -271,6 +300,7 @@ pub enum BuildingKind {
     University,
     Smithy,
     Library,
+    Temple,
 }
 
 impl BuildingKind {
@@ -287,6 +317,7 @@ impl BuildingKind {
             BuildingKind::University => UNIVERSITY_COST,
             BuildingKind::Smithy => SMITHY_COST,
             BuildingKind::Library => LIBRARY_COST,
+            BuildingKind::Temple => TEMPLE_COST,
         }
     }
 }
@@ -361,6 +392,9 @@ pub struct Settlement {
     pub faith: f32,
     pub blessing: Blessing,
     pub blessing_left: f64,
+    pub prophecy: Prophecy,
+    pub prophecy_left: f32,
+    pub revelation: f32,
     pub plague_until: u64,
     pub empire: Option<usize>,
     pub alive: bool,
@@ -771,6 +805,9 @@ impl Sim {
                 faith: 0.0,
                 blessing: Blessing::None,
                 blessing_left: 0.0,
+                prophecy: Prophecy::None,
+                prophecy_left: 0.0,
+                revelation: 0.0,
                 plague_until: 0,
                 empire: None,
                 alive: true,
@@ -1228,6 +1265,23 @@ impl Sim {
         }
     }
 
+    fn promote_prophet(&mut self, ti: usize) {
+        for fid in 0..self.families.len() {
+            if self.families[fid].town != ti || self.families[fid].extinct {
+                continue;
+            }
+            if self.families[fid].role == Role::Priest {
+                self.families[fid].role = Role::Prophet;
+                for a in self.agents.iter_mut() {
+                    if a.family == fid {
+                        a.role = Role::Prophet;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     fn promote_healer(&mut self, ti: usize) {
         for fid in 0..self.families.len() {
             if self.families[fid].town != ti || self.families[fid].extinct {
@@ -1452,6 +1506,10 @@ impl Sim {
                         && !has(BuildingKind::Library) && !need(BuildingKind::Library)
                     {
                         t.queue.push((BuildingKind::Library, 0.0));
+                    } else if has(BuildingKind::Sanctuary) && t.faith >= 25.0
+                        && !has(BuildingKind::Temple) && !need(BuildingKind::Temple)
+                    {
+                        t.queue.push((BuildingKind::Temple, 0.0));
                     } else if pop_ti >= t.cap && has(BuildingKind::House) && !need(BuildingKind::House) {
                         t.queue.push((BuildingKind::House, 0.0));
                     }
@@ -1494,6 +1552,9 @@ impl Sim {
                 }
                 if k == BuildingKind::Barracks {
                     self.promote_guard(ti);
+                }
+                if k == BuildingKind::Temple {
+                    self.promote_prophet(ti);
                 }
                 if k == BuildingKind::University {
                     self.promote_scholar(ti);
@@ -1543,6 +1604,8 @@ impl Sim {
 
         if self.tick_count % REGROW_EVERY == 0 {
             let abundant = self.towns.iter().any(|t| t.blessing == Blessing::Abundance);
+            let proph_harvest = self.towns.iter().any(|t| t.prophecy == Prophecy::Harvest);
+            let proph_rain = self.towns.iter().any(|t| t.prophecy == Prophecy::Rain);
             let berry = match self.weather {
                 Weather::Rain => 2.0,
                 Weather::Frost => 0.5,
@@ -1566,7 +1629,7 @@ impl Sim {
                 Weather::Heat => WATER_REGEN_HEAT,
                 Weather::Frost => WATER_REGEN_FROST,
                 Weather::Clear => WATER_REGEN_CLEAR,
-            } * season_water;
+            } * season_water + if proph_rain { 1.5 } else { 0.0 };
             let dt = self.tick_count / REGROW_EVERY;
             let mut new_lakes: Vec<(i32, i32)> = Vec::new();
             for y in 0..H {
@@ -1576,11 +1639,11 @@ impl Sim {
                     match self.grid[i].terrain {
                         Terrain::Forest if !on_road => {
                             let k = (self.grid[i].food / FOOD_MAX).max(0.3);
-                            let ber = berry * season_berry * k + if abundant { 1.0 } else { 0.0 };
+                            let ber = berry * season_berry * k + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 1.5 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
                         }
                         Terrain::Farm if !on_road => {
-                            let cr = crop * season_crop + if abundant { 1.0 } else { 0.0 };
+                            let cr = crop * season_crop + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 2.0 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
                         }
                         Terrain::Water => {
@@ -1678,6 +1741,35 @@ impl Sim {
                     Blessing::Protection
                 };
                 t.blessing_left = BLESS_LEN;
+            }
+            if t.prophecy_left > 0.0 {
+                t.prophecy_left -= 1.0;
+                if t.prophecy_left <= 0.0 {
+                    t.prophecy = Prophecy::None;
+                }
+            }
+            let temples = t.built.iter().filter(|b| **b == BuildingKind::Temple).count() as f32;
+            if temples > 0.0 {
+                t.revelation = (t.revelation + REVELATION_PER_TICK * temples).min(100.0);
+            }
+            if self.tick_count % RITUAL_EVERY == 0 && t.revelation >= PROPHECY_COST && t.prophecy == Prophecy::None {
+                t.revelation -= PROPHECY_COST;
+                let roll = rfrac(&mut self.rng);
+                t.prophecy = if roll < 0.25 {
+                    Prophecy::Harvest
+                } else if roll < 0.50 {
+                    Prophecy::Rain
+                } else if roll < 0.70 {
+                    Prophecy::PlagueWarning
+                } else if roll < 0.85 {
+                    Prophecy::Prosperity
+                } else {
+                    Prophecy::HolyWar
+                };
+                t.prophecy_left = PROPHECY_LEN;
+            }
+            if t.prophecy == Prophecy::Prosperity && self.tick_count % 100 == 0 {
+                t.stocks.gold = (t.stocks.gold + 2.0).min(500.0);
             }
         }
 
@@ -2225,6 +2317,10 @@ impl Sim {
                 ResourceKind::Gold,
                 st.gold > 5.0 && st.water > 8.0 && st.food > 8.0,
             ),
+            Role::Prophet => (
+                ResourceKind::Gold,
+                st.water > 8.0 && st.food > 8.0,
+            ),
             Role::Healer => (need, true),
             Role::Guard => (need, need != ResourceKind::Meat),
             Role::Scholar => (need, true),
@@ -2683,10 +2779,12 @@ impl Sim {
                 };
                 let crowded = self.pop(ti) >= cap && cap >= 10;
                 let foul = self.weather == Weather::Frost || self.weather == Weather::Rain;
+                let prophylaxis = self.towns[ti].prophecy == Prophecy::PlagueWarning;
                 if crowded && (foul || at_war) {
                     let h = self.brain(tx, ty, self.tick_count);
                     let dice = h % 100000;
-                    if dice < (PLAGUE_CHANCE * 100000.0) as u32 {
+                    let chance = if prophylaxis { PLAGUE_CHANCE * 0.3 } else { PLAGUE_CHANCE };
+                    if dice < (chance * 100000.0) as u32 {
                         self.towns[ti].plague_until = PLAGUE_LEN;
                         let patient = self
                             .agents
@@ -2968,6 +3066,9 @@ impl Sim {
             faith: 0.0,
             blessing: Blessing::None,
             blessing_left: 0.0,
+            prophecy: Prophecy::None,
+            prophecy_left: 0.0,
+            revelation: 0.0,
             plague_until: 0,
             empire: None,
             alive: true,
@@ -3576,7 +3677,8 @@ impl Sim {
                 continue;
             }
             let chance = RAID_CHANCE_PER_TICK
-                * if self.towns[i].idea == TownIdea::War { 3.0 } else { 1.0 };
+                * if self.towns[i].idea == TownIdea::War { 3.0 } else { 1.0 }
+                * if self.towns[i].prophecy == Prophecy::HolyWar { 2.0 } else { 1.0 };
             if rfrac(&mut self.rng) < chance {
                 self.try_raid(i);
             }
@@ -3786,6 +3888,7 @@ impl Sim {
                     BuildingKind::Barracks => Some(Role::Guard),
                     BuildingKind::University => Some(Role::Scholar),
                     BuildingKind::Smithy => Some(Role::Builder),
+                    BuildingKind::Temple => Some(Role::Prophet),
                     _ => None,
                 })
                 .collect();
@@ -5477,6 +5580,9 @@ fn marriages_form_and_cheapen_births() {
                 faith: 0.0,
                 blessing: Blessing::None,
                 blessing_left: 0.0,
+                prophecy: Prophecy::None,
+                prophecy_left: 0.0,
+                revelation: 0.0,
                 plague_until: 0,
                 empire: None,
                 alive: true,

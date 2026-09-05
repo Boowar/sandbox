@@ -430,6 +430,14 @@ fn draw_building(
             ctx.fill_rect(px + 1.0, py, 4.0, 1.0);
             ctx.fill_rect(px + 2.0, py + 1.0, 2.0, 2.0);
         }
+        crate::sim::BuildingKind::Temple => {
+            ctx.set_fill_style_str("rgb(180,160,220)");
+            ctx.fill_rect(px + 1.0, py, 4.0, 1.0);
+            ctx.set_fill_style_str("rgb(140,120,180)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 4.0);
+            ctx.set_fill_style_str("rgb(220,200,255)");
+            ctx.fill_rect(px + 2.0, py + 1.0, 2.0, 2.0);
+        }
     }
 }
 
@@ -735,6 +743,7 @@ pub fn draw(
             Role::Guard => "rgb(210,120,120)",
             Role::Scholar => "rgb(202,166,255)",
             Role::Builder => "rgb(255,194,92)",
+            Role::Prophet => "rgb(180,140,240)",
         };
         ctx.set_fill_style_str(role_col);
         ctx.fill_rect(fx + 3.0, fy + 2.0, 1.0, 1.0);
@@ -887,6 +896,7 @@ for a in &sim.animals {
         count_building(sim, crate::sim::BuildingKind::Clinic), count_building(sim, crate::sim::BuildingKind::Wall),
         count_building(sim, crate::sim::BuildingKind::Barracks),
     );
+    let temples = count_building(sim, crate::sim::BuildingKind::Temple);
     let science: f32 = sim.towns.iter().map(|t| t.dev).sum();
     let scholars: usize = sim.agents.iter().filter(|a| a.role == Role::Scholar).count();
     let builders: usize = sim.agents.iter().filter(|a| a.role == Role::Builder).count();
@@ -927,7 +937,7 @@ for a in &sim.animals {
     line_colors.push(None);
 
     if hud.show_buildings {
-        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, pending));
+        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{} 🛕{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, temples, pending));
         line_colors.push(None);
     }
 
@@ -1069,7 +1079,8 @@ for a in &sim.animals {
             };
             let mut role_counts = [(Role::Worker, 0u32), (Role::Farmer, 0u32), (Role::Miner, 0u32),
                 (Role::Hunter, 0u32), (Role::Builder, 0u32), (Role::Healer, 0u32),
-                (Role::Priest, 0u32), (Role::Scholar, 0u32), (Role::Guard, 0u32)];
+                (Role::Priest, 0u32), (Role::Scholar, 0u32), (Role::Guard, 0u32),
+                (Role::Prophet, 0u32)];
             for a in &agents {
                 for (r, c) in role_counts.iter_mut() {
                     if a.role == *r { *c += 1; }
@@ -1088,6 +1099,7 @@ for a in &sim.animals {
             let uni = build_counts(crate::sim::BuildingKind::University);
             let smith = build_counts(crate::sim::BuildingKind::Smithy);
             let lib = build_counts(crate::sim::BuildingKind::Library);
+            let temple = build_counts(crate::sim::BuildingKind::Temple);
             let bless_name = match t.blessing {
                 crate::sim::Blessing::Fertility => "плодородие",
                 crate::sim::Blessing::Abundance => "изобилие",
@@ -1116,6 +1128,7 @@ for a in &sim.animals {
                     crate::sim::BuildingKind::Wall => "⛋", crate::sim::BuildingKind::Barracks => "⛩",
                     crate::sim::BuildingKind::University => "🎓", crate::sim::BuildingKind::Smithy => "🔨",
                     crate::sim::BuildingKind::Library => "📚",
+                    crate::sim::BuildingKind::Temple => "🛕",
                 }).collect::<Vec<_>>().join("")
             };
             let families: Vec<_> = sim.families.iter()
@@ -1154,7 +1167,7 @@ for a in &sim.animals {
             p.push(String::new());
 
             p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
-            p.push(format!("⛩{} 🎓{} 🔨{} 📚{}", barracks, uni, smith, lib));
+            p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{}", barracks, uni, smith, lib, temple));
             if !t.queue.is_empty() {
                 p.push(format!(" ⏳ {} ({:.0}%)", queue_str, t.queue[0].1 * 100.0));
             }
@@ -1166,6 +1179,7 @@ for a in &sim.animals {
                         Role::Worker => "⚙", Role::Farmer => "🌱", Role::Miner => "⛏",
                         Role::Hunter => "🏹", Role::Builder => "🔨", Role::Healer => "💚",
                         Role::Priest => "🙏", Role::Scholar => "🎓", Role::Guard => "⚔",
+                        Role::Prophet => "🔮",
                     };
                     role_line.push_str(&format!("{}{} ", icon, c));
                 }
@@ -1219,6 +1233,12 @@ for a in &sim.animals {
             }
             if !bless_name.is_empty() {
                 p.push(format!("✨ {} ({}.0 тик.)", bless_name, t.blessing_left as u32));
+            }
+            if t.prophecy != crate::sim::Prophecy::None {
+                p.push(format!("🔮 {} ({}.0 тик.)", t.prophecy.name(), t.prophecy_left as u32));
+            }
+            if t.revelation > 0.0 {
+                p.push(format!("📜 revelation {:.0}", t.revelation));
             }
             if t.plague_until > 0 {
                 p.push("☠ ЧУМА!".to_string());
