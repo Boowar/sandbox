@@ -29,6 +29,10 @@ const GOLD_VEIN_RANGE: i32 = 24;
 const MIGRATE_EVERY: u64 = 500;
 const MIGRATE_CHANCE_P: u32 = 6;
 const MIGRATE_QUALITY_MARGIN: f32 = 5.0;
+pub const DAY_LEN: u64 = 1200;
+const SEASON_LEN: u64 = 6000;
+const NIGHT_WORK_MULT: f32 = 0.6;
+const NIGHT_DANGER: f32 = 2.0;
 const MARRIAGE_EVERY: u64 = 900;
 const MARRIAGE_CHANCE_P: u32 = 5;
 const MARRIAGE_LENGTH: u64 = 3000;
@@ -153,6 +157,14 @@ pub enum Weather {
     Rain,
     Heat,
     Frost,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Season {
+    Spring,
+    Summer,
+    Autumn,
+    Winter,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -413,6 +425,8 @@ pub struct Sim {
     pub tick_count: u64,
     pub weather: Weather,
     pub weather_left: f64,
+    pub season: Season,
+    pub day_phase: u64,
     rng: u64,
 }
 
@@ -456,6 +470,8 @@ impl Sim {
             tick_count: 0,
             weather: Weather::Clear,
             weather_left: 0.0,
+            season: Season::Spring,
+            day_phase: 0,
             rng,
         };
         sim.ensure_hills();
@@ -1352,6 +1368,15 @@ impl Sim {
     pub fn tick(&mut self) {
         self.tick_count += 1;
         self.weather_breath();
+        self.day_phase = (self.day_phase + 1) % DAY_LEN;
+        if self.tick_count % SEASON_LEN == 0 {
+            self.season = match self.season {
+                Season::Spring => Season::Summer,
+                Season::Summer => Season::Autumn,
+                Season::Autumn => Season::Winter,
+                Season::Winter => Season::Spring,
+            };
+        }
 
         let hunger_rate = match self.weather {
             Weather::Frost => 1.3,
@@ -1387,13 +1412,20 @@ impl Sim {
                 Weather::Frost => 1.5,
                 _ => 2.5,
             };
+            let season_berry = match self.season {
+                Season::Spring => 1.4,
+                Season::Winter => 0.5,
+                _ => 1.0,
+            };
+            let season_crop = if self.season == Season::Winter { 0.6 } else { 1.0 };
+            let season_water = if self.season == Season::Winter { 0.4 } else { 1.0 };
             let rain = self.weather == Weather::Rain;
             let water_regen = match self.weather {
                 Weather::Rain => WATER_REGEN_RAIN,
                 Weather::Heat => WATER_REGEN_HEAT,
                 Weather::Frost => WATER_REGEN_FROST,
                 Weather::Clear => WATER_REGEN_CLEAR,
-            };
+            } * season_water;
             let dt = self.tick_count / REGROW_EVERY;
             let mut new_lakes: Vec<(i32, i32)> = Vec::new();
             for y in 0..H {
@@ -1402,11 +1434,11 @@ impl Sim {
                     match self.grid[i].terrain {
                         Terrain::Forest => {
                             let k = (self.grid[i].food / FOOD_MAX).max(0.85);
-                            let ber = berry * k + if abundant { 1.0 } else { 0.0 };
+                            let ber = berry * season_berry * k + if abundant { 1.0 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
                         }
                         Terrain::Farm => {
-                            let cr = crop + if abundant { 1.0 } else { 0.0 };
+                            let cr = crop * season_crop + if abundant { 1.0 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
                         }
                         Terrain::Water => {
@@ -1445,13 +1477,14 @@ impl Sim {
             }
         }
 
+        let wmult = if self.is_night() { NIGHT_WORK_MULT } else { 1.0 };
         for t in self.towns.iter_mut() {
             if !t.alive {
                 continue;
             }
             let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
             if wells > 0 {
-                t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32).min(200.0);
+                t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32 * wmult).min(200.0);
             }
             let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
             if posts > 0 {
@@ -1562,16 +1595,30 @@ impl Sim {
             return;
         }
         let p = rfrac(&mut self.rng);
-        self.weather = if p < 0.55 {
+        let (clear, rain, heat, _frost) = match self.season {
+            Season::Spring => (0.35, 0.35, 0.10, 0.20),
+            Season::Summer => (0.45, 0.10, 0.35, 0.10),
+            Season::Autumn => (0.50, 0.20, 0.10, 0.20),
+            Season::Winter => (0.40, 0.10, 0.05, 0.45),
+        };
+        self.weather = if p < clear {
             Weather::Clear
-        } else if p < 0.7 {
+        } else if p < clear + rain {
             Weather::Rain
-        } else if p < 0.85 {
+        } else if p < clear + rain + heat {
             Weather::Heat
         } else {
             Weather::Frost
         };
         self.weather_left = 300.0 + rfrac(&mut self.rng) as f64 * 400.0;
+    }
+
+    pub fn is_night(&self) -> bool {
+        self.day_phase >= DAY_LEN / 2
+    }
+
+    pub fn is_day(&self) -> bool {
+        !self.is_night()
     }
 
     fn animals_step(&mut self) {
@@ -2298,8 +2345,9 @@ impl Sim {
                 }
             }
             Action::Stay => {
+                let rest = if self.is_night() { 10.0 } else { 6.0 };
                 let a = &mut self.agents[i];
-                a.energy = (a.energy + 6.0).min(100.0);
+                a.energy = (a.energy + rest).min(100.0);
             }
             Action::Eat => {
                 let ti = self.agents[i].home;
@@ -2858,8 +2906,10 @@ impl Sim {
             if nearby >= 3 {
                 continue;
             }
-            let pack =
+            let danger = if self.is_night() { NIGHT_DANGER } else { 1.0 };
+            let base_pack =
                 3 + (self.brain(tx, ty, epoch.wrapping_add(7)) % (HORDE_PACK_MAX as u32 - 2)) as usize;
+            let pack = ((base_pack as f32 * danger).round() as usize).min(HORDE_PACK_MAX);
             let base = self.brain(tx, ty, epoch.wrapping_add(13));
             let mut placed = 0;
             for k in 0..pack {
@@ -3611,14 +3661,27 @@ mod tests {
     #[test]
     fn births_require_food_and_water() {
         let mut s = Sim::new(14);
-        s.agents.retain(|a| a.home != 0);
-        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.agents.clear();
         for _ in 0..2 {
-            s.spawn_agent(0, tx, ty, 0, false);
+            s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 0, false);
         }
-        while s.tick_count % BIRTH_EVERY != BIRTH_EVERY - 1 {
-            s.tick();
+        if let Some(f) = s.families.iter_mut().find(|f| f.town == 0) {
+            f.extinct = false;
+            f.members = 2;
+        } else {
+            s.families.push(Family {
+                id: 0,
+                town: 0,
+                members: 2,
+                children: 0,
+                name: "Test".into(),
+                extinct: false,
+                accent: (200, 200, 200),
+                role: Role::Worker,
+            });
         }
+        s.towns[0].cap = 100;
+        s.tick_count = BIRTH_EVERY - 1;
         s.towns[0].stocks.food = 60.0;
         s.towns[0].stocks.water = 40.0;
         s.towns[0].stocks.ore = 100.0;
@@ -4036,6 +4099,7 @@ mod tests {
         }
         s.weather = Weather::Clear;
         s.weather_left = 100000.0;
+        s.season = Season::Summer;
         let mut forests = Vec::new();
         for y in 0..H {
             for x in 0..W {
@@ -4946,11 +5010,9 @@ fn migration_relocates_adults_to_better_town() {
                 s2.agents.push(a2);
             }
             let mut moved = 0;
-            for _ in 0..4 {
-                while s1.tick_count % MIGRATE_EVERY != MIGRATE_EVERY - 1 {
-                    s1.tick();
-                    s2.tick();
-                }
+            for w in 0u64..4 {
+                s1.tick_count = MIGRATE_EVERY * w + MIGRATE_EVERY - 1;
+                s2.tick_count = s1.tick_count;
                 let before: Vec<usize> = s1.agents.iter().map(|a| a.home).collect();
                 s1.tick();
                 s2.tick();
@@ -5420,5 +5482,61 @@ fn marriages_form_and_cheapen_births() {
             assert_eq!(s.grid[idx(vx, vy)].terrain, Terrain::Hills, "vein sits in hills");
             assert!(s.grid[idx(vx, vy)].gold > 0.0, "vein cell holds gold");
         }
+    }
+
+    #[test]
+    fn day_night_cycle_advances() {
+        let mut s = Sim::new(3);
+        assert_eq!(s.day_phase, 0);
+        assert!(s.is_day());
+        for _ in 0..DAY_LEN / 2 {
+            s.tick();
+        }
+        assert!(s.is_night(), "the world should turn dark when halfway through the day");
+        for _ in 0..DAY_LEN / 2 {
+            s.tick();
+        }
+        assert!(s.is_day(), "dawn should arrive after a full cycle");
+        assert_eq!(s.day_phase, 0, "day phase wraps around each full day");
+    }
+
+    #[test]
+    fn seasons_rotate_in_order() {
+        let mut s = Sim::new(3);
+        assert_eq!(s.season, Season::Spring);
+        s.tick_count = SEASON_LEN - 1;
+        s.tick();
+        assert_eq!(s.season, Season::Summer, "spring turns to summer");
+        s.tick_count = 2 * SEASON_LEN - 1;
+        s.tick();
+        assert_eq!(s.season, Season::Autumn, "summer turns to autumn");
+        s.tick_count = 3 * SEASON_LEN - 1;
+        s.tick();
+        assert_eq!(s.season, Season::Winter, "autumn turns to winter");
+        s.tick_count = 4 * SEASON_LEN - 1;
+        s.tick();
+        assert_eq!(s.season, Season::Spring, "winter turns back to spring");
+    }
+
+    #[test]
+    fn wells_produce_less_at_night() {
+        let mut s = Sim::new(3);
+        let ti = 0;
+        s.towns[ti].built.push(BuildingKind::Well);
+        s.towns[ti].stocks.water = 0.0;
+        s.day_phase = 0;
+        s.tick();
+        let day_gain = s.towns[ti].stocks.water;
+        assert!(day_gain > 0.0, "wells should produce water by day");
+        s.towns[ti].stocks.water = 0.0;
+        s.day_phase = DAY_LEN / 2 + 1;
+        s.tick();
+        let night_gain = s.towns[ti].stocks.water;
+        assert!(
+            night_gain < day_gain,
+            "wells should produce less water at night ({} < {})",
+            night_gain,
+            day_gain
+        );
     }
 }

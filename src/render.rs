@@ -1,4 +1,4 @@
-use crate::sim::{Role, Species, Terrain, TownIdea, Weather, H, Sim, W};
+use crate::sim::{Role, Species, Season, Terrain, TownIdea, Weather, DAY_LEN, H, Sim, W};
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
@@ -711,6 +711,32 @@ for a in &sim.animals {
         }
     }
 
+    if sim.is_night() {
+        ctx.set_fill_style_str("rgba(8,12,26,0.34)");
+        ctx.fill_rect(0.0, 0.0, cw, ch);
+    }
+    let dawn_len = DAY_LEN as f64 * 0.1;
+    let phase = sim.day_phase as f64;
+    let dusk = if phase < dawn_len {
+        (dawn_len - phase) / dawn_len
+    } else if phase > DAY_LEN as f64 - dawn_len {
+        (phase - (DAY_LEN as f64 - dawn_len)) / dawn_len
+    } else {
+        0.0
+    };
+    if dusk > 0.0 {
+        ctx.set_fill_style_str(&format!("rgba(255,150,60,{:.2})", dusk * 0.18));
+        ctx.fill_rect(0.0, 0.0, cw, ch);
+    }
+    let season_tint = match sim.season {
+        Season::Winter => "rgba(195,220,255,0.13)",
+        Season::Spring => "rgba(140,240,170,0.06)",
+        Season::Summer => "rgba(255,225,130,0.05)",
+        Season::Autumn => "rgba(220,150,70,0.11)",
+    };
+    ctx.set_fill_style_str(season_tint);
+    ctx.fill_rect(0.0, 0.0, cw, ch);
+
     for e in fxs {
         let k = (e.life / 26.0).clamp(0.0, 1.0) as f64;
         let rad = 2.0 + (1.0 - k) * 9.0;
@@ -794,9 +820,16 @@ for a in &sim.animals {
         Weather::Heat => "🔥 жара",
         Weather::Frost => "❄ мороз",
     };
+    let season_name = match sim.season {
+        Season::Spring => "весна",
+        Season::Summer => "лето",
+        Season::Autumn => "осень",
+        Season::Winter => "зима",
+    };
+    let day_name = if sim.is_day() { "☀ день" } else { "🌙 ночь" };
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let mut lines: Vec<String> = Vec::new();
-    lines.push(format!("tick {}", sim.tick_count));
+    lines.push(format!("tick {}  {}  {}", sim.tick_count, season_name, day_name));
     lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{} ⛋{} ⛩{}  uni{} sm{} lib{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, clinics, walls, barracks, unis, smiths, libs, pending));
     lines.push(format!("science {}  scholars {}  builders {}", science as u32, scholars, builders));
     let burning: usize = sim.grid.iter().filter(|c| c.burn > 0).count();
