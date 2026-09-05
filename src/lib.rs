@@ -330,6 +330,9 @@ impl App {
             "6" => self.build(sim::BuildingKind::Clinic),
             "7" => self.build(sim::BuildingKind::Wall),
             "8" => self.build(sim::BuildingKind::Barracks),
+            "9" => self.build(sim::BuildingKind::University),
+            "0" => self.build(sim::BuildingKind::Smithy),
+            "q" | "Q" | "й" | "Й" => self.build(sim::BuildingKind::Library),
             "c" | "C" | "с" | "С" => self.breed_cows(),
             "r" | "R" | "к" | "К" => self.new_world(),
             _ => {}

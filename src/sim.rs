@@ -105,6 +105,19 @@ const DEFENSE_BASE: f32 = 0.3;
 const DEFENSE_WALL_BONUS: f32 = 0.15;
 const DEFENSE_BARRACKS_BONUS: f32 = 0.2;
 
+const TECH_EVERY: u64 = 350;
+const TECH_TIER1: f32 = 500.0;
+const TECH_TIER2: f32 = 1800.0;
+const TECH_TIER3: f32 = 4500.0;
+const SCIENCE_REQ_POP: usize = 6;
+const DEV_BASE: f32 = 2.0;
+const DEV_UNI_BONUS: f32 = 4.0;
+const DEV_LIB_BONUS: f32 = 1.5;
+const DEV_SCHOLAR_BONUS: f32 = 1.0;
+const UNIVERSITY_COST: f32 = 70.0;
+const SMITHY_COST: f32 = 85.0;
+const LIBRARY_COST: f32 = 110.0;
+
 pub const CHILD_AGE: u32 = 90;
 pub const OLD_AGE: u32 = 24000;
 
@@ -147,6 +160,8 @@ pub enum Role {
     Priest,
     Healer,
     Guard,
+    Scholar,
+    Builder,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -226,6 +241,9 @@ pub enum BuildingKind {
     Clinic,
     Wall,
     Barracks,
+    University,
+    Smithy,
+    Library,
 }
 
 impl BuildingKind {
@@ -239,6 +257,9 @@ impl BuildingKind {
             BuildingKind::Clinic => CLINIC_COST,
             BuildingKind::Wall => WALL_COST,
             BuildingKind::Barracks => BARRACKS_COST,
+            BuildingKind::University => UNIVERSITY_COST,
+            BuildingKind::Smithy => SMITHY_COST,
+            BuildingKind::Library => LIBRARY_COST,
         }
     }
 }
@@ -312,6 +333,7 @@ pub struct Settlement {
     pub empire: Option<usize>,
     pub alive: bool,
     pub waste: u64,
+    pub dev: f32,
 }
 
 pub struct Empire {
@@ -626,6 +648,7 @@ impl Sim {
                 empire: None,
                 alive: true,
                 waste: 0,
+                dev: 0.0,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -1106,6 +1129,48 @@ impl Sim {
         }
     }
 
+    fn promote_scholar(&mut self, ti: usize) {
+        for fid in 0..self.families.len() {
+            if self.families[fid].town != ti || self.families[fid].extinct {
+                continue;
+            }
+            if matches!(
+                self.families[fid].role,
+                Role::Priest | Role::Healer | Role::Guard | Role::Scholar
+            ) {
+                continue;
+            }
+            self.families[fid].role = Role::Scholar;
+            for a in self.agents.iter_mut() {
+                if a.family == fid {
+                    a.role = Role::Scholar;
+                }
+            }
+            break;
+        }
+    }
+
+    fn promote_builder(&mut self, ti: usize) {
+        for fid in 0..self.families.len() {
+            if self.families[fid].town != ti || self.families[fid].extinct {
+                continue;
+            }
+            if matches!(
+                self.families[fid].role,
+                Role::Priest | Role::Healer | Role::Guard | Role::Scholar | Role::Builder
+            ) {
+                continue;
+            }
+            self.families[fid].role = Role::Builder;
+            for a in self.agents.iter_mut() {
+                if a.family == fid {
+                    a.role = Role::Builder;
+                }
+            }
+            break;
+        }
+    }
+
     fn plant_fields(&mut self, cx: i32, cy: i32) {
         let mut cands = Vec::new();
         for dy in -6..=6 {
@@ -1137,8 +1202,65 @@ impl Sim {
     }
 
     pub fn build_request(&mut self, ti: usize, kind: BuildingKind) {
-        if ti < self.towns.len() {
+        if ti < self.towns.len() && self.can_build(ti, kind) {
             self.towns[ti].queue.push((kind, 0.0));
+        }
+    }
+
+    fn tech_tier(&self, ti: usize) -> u32 {
+        let d = self.towns[ti].dev;
+        if d >= TECH_TIER3 {
+            3
+        } else if d >= TECH_TIER2 {
+            2
+        } else if d >= TECH_TIER1 {
+            1
+        } else {
+            0
+        }
+    }
+
+    pub fn can_build(&self, ti: usize, kind: BuildingKind) -> bool {
+        match kind {
+            BuildingKind::University => self.tech_tier(ti) >= 1,
+            BuildingKind::Smithy => self.tech_tier(ti) >= 2,
+            BuildingKind::Library => self.tech_tier(ti) >= 3,
+            _ => true,
+        }
+    }
+
+    fn tech_step(&mut self) {
+        for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive {
+                continue;
+            }
+            if self.pop(ti) < SCIENCE_REQ_POP {
+                continue;
+            }
+            let (uni, lib, scholars) = {
+                let t = &self.towns[ti];
+                let uni = t
+                    .built
+                    .iter()
+                    .filter(|b| **b == BuildingKind::University)
+                    .count();
+                let lib = t
+                    .built
+                    .iter()
+                    .filter(|b| **b == BuildingKind::Library)
+                    .count();
+                let scholars = self
+                    .agents
+                    .iter()
+                    .filter(|a| a.home == ti && a.role == Role::Scholar)
+                    .count();
+                (uni, lib, scholars)
+            };
+            let gain = DEV_BASE
+                + DEV_UNI_BONUS * uni as f32
+                + DEV_LIB_BONUS * lib as f32
+                + DEV_SCHOLAR_BONUS * scholars as f32;
+            self.towns[ti].dev += gain;
         }
     }
 
@@ -1147,6 +1269,16 @@ impl Sim {
             if !self.towns[ti].alive {
                 continue;
             }
+            let smithy_bonus = self.towns[ti]
+                .built
+                .iter()
+                .filter(|b| **b == BuildingKind::Smithy)
+                .count();
+            let builder_bonus = self
+                .agents
+                .iter()
+                .filter(|a| a.home == ti && a.role == Role::Builder)
+                .count();
             let apply = {
                 let t = &mut self.towns[ti];
                 if t.queue.is_empty() {
@@ -1161,6 +1293,7 @@ impl Sim {
                 t.stocks.ore -= 1.0;
                 let (kind, progress) = &mut t.queue[0];
                 *progress += if t.idea == TownIdea::Toil { 2.0 } else { 1.0 };
+                *progress += (smithy_bonus + builder_bonus) as f32;
                 if *progress >= kind.cost() {
                     Some(t.queue.remove(0).0)
                 } else {
@@ -1186,6 +1319,12 @@ impl Sim {
                 }
                 if k == BuildingKind::Barracks {
                     self.promote_guard(ti);
+                }
+                if k == BuildingKind::University {
+                    self.promote_scholar(ti);
+                }
+                if k == BuildingKind::Smithy {
+                    self.promote_builder(ti);
                 }
                 self.towns[ti].built.push(k);
             }
@@ -1385,6 +1524,9 @@ impl Sim {
         }
         if self.tick_count % METEOR_EVERY == 0 {
             self.meteor_step();
+        }
+        if self.tick_count % TECH_EVERY == 0 {
+            self.tech_step();
         }
     }
 
@@ -1841,6 +1983,8 @@ impl Sim {
             ),
             Role::Healer => (need, true),
             Role::Guard => (need, need != ResourceKind::Meat),
+            Role::Scholar => (need, true),
+            Role::Builder => (need, true),
         };
         if ok && kind != need {
             kind
@@ -2503,6 +2647,7 @@ impl Sim {
             empire: None,
             alive: true,
             waste: 0,
+            dev: 0.0,
         });
         let ti = self.towns.len() - 1;
         let fid = self.families.len();
@@ -4690,6 +4835,7 @@ fn marriages_form_and_cheapen_births() {
                 empire: None,
                 alive: true,
                 waste: 0,
+                dev: 0.0,
             });
         }
     }
@@ -4822,5 +4968,105 @@ fn marriages_form_and_cheapen_births() {
             return;
         }
         panic!("no seed signed an inter-empire treaty");
+    }
+
+    #[test]
+    fn science_accumulates_and_unlocks_tiers() {
+        let mut s = Sim::new(90);
+        s.agents.clear();
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0 };
+        for _ in 0..6 {
+            s.spawn_agent(0, tx, ty, 0, false);
+        }
+        assert_eq!(s.tech_tier(0), 0, "fresh towns know no science");
+        assert!(!s.can_build(0, BuildingKind::University), "tier0 must block university");
+        s.tick_count = TECH_EVERY;
+        s.tech_step();
+        assert!(s.towns[0].dev >= DEV_BASE, "science should accumulate in a settled town");
+        s.towns[0].dev = TECH_TIER1 - 1.0;
+        assert_eq!(s.tech_tier(0), 0);
+        s.towns[0].dev = TECH_TIER1;
+        assert_eq!(s.tech_tier(0), 1, "tier1 at the first threshold");
+        assert!(s.can_build(0, BuildingKind::University), "tier1 must unlock university");
+        assert!(!s.can_build(0, BuildingKind::Smithy), "tier1 must still block smithy");
+        assert!(!s.can_build(0, BuildingKind::Library), "tier1 must still block library");
+        s.towns[0].dev = TECH_TIER2;
+        assert_eq!(s.tech_tier(0), 2);
+        assert!(s.can_build(0, BuildingKind::Smithy), "tier2 must unlock smithy");
+        assert!(!s.can_build(0, BuildingKind::Library), "tier2 must still block library");
+        s.towns[0].dev = TECH_TIER3;
+        assert_eq!(s.tech_tier(0), 3);
+        assert!(s.can_build(0, BuildingKind::Library), "tier3 must unlock library");
+    }
+
+    #[test]
+    fn low_tier_towns_cannot_request_tech_buildings() {
+        let mut s = Sim::new(91);
+        s.towns[0].dev = 0.0;
+        s.build_request(0, BuildingKind::University);
+        assert!(s.towns[0].queue.is_empty(), "university must not enter the queue without science");
+        s.towns[0].dev = TECH_TIER1;
+        s.build_request(0, BuildingKind::University);
+        assert_eq!(s.towns[0].queue.len(), 1, "university should queue at tier1");
+        s.build_request(0, BuildingKind::Smithy);
+        s.build_request(0, BuildingKind::Library);
+        assert_eq!(s.towns[0].queue.len(), 1, "smithy/library need higher tiers");
+    }
+
+    #[test]
+    fn university_fosters_scholars_and_accelerates_science() {
+        let mut s = Sim::new(92);
+        craft_families(&mut s);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0 };
+        s.towns[0].dev = TECH_TIER1;
+        for _ in 0..6 {
+            s.spawn_agent(0, tx, ty, 0, false);
+        }
+        s.build_request(0, BuildingKind::University);
+        s.towns[0].queue[0].1 = UNIVERSITY_COST - 1.0;
+        s.construction();
+        assert!(
+            s.towns[0].built.iter().any(|b| *b == BuildingKind::University),
+            "university should finish construction"
+        );
+        assert!(
+            s.families.iter().any(|f| !f.extinct && f.role == Role::Scholar),
+            "university should raise a scholar family"
+        );
+        let scholars = s.agents.iter().filter(|a| a.role == Role::Scholar).count();
+        assert!(scholars >= 1, "the scholar agent should carry the role");
+        s.tick_count = TECH_EVERY;
+        let before = s.towns[0].dev;
+        s.tech_step();
+        let gain = s.towns[0].dev - before;
+        let expected = DEV_BASE + DEV_UNI_BONUS + scholars as f32 * DEV_SCHOLAR_BONUS;
+        assert!(
+            (gain - expected).abs() < 0.05,
+            "university + scholar should boost science (gain {} vs {})",
+            gain,
+            expected
+        );
+    }
+
+    #[test]
+    fn smithy_and_builders_speed_construction() {
+        let mut s = Sim::new(93);
+        craft_families(&mut s);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0 };
+        s.towns[0].built.push(BuildingKind::Smithy);
+        s.spawn_agent(0, tx, ty, 0, false);
+        let bi = s.agents.len() - 1;
+        s.agents[bi].role = Role::Builder;
+        s.build_request(0, BuildingKind::Barracks);
+        s.towns[0].queue[0].1 = BARRACKS_COST - 3.0;
+        s.construction();
+        assert_eq!(s.towns[0].queue.len(), 0, "smithy + builder should finish the frame");
+        assert!(
+            s.towns[0].built.iter().any(|b| *b == BuildingKind::Barracks),
+            "barracks should complete"
+        );
     }
 }

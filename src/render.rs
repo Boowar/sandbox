@@ -300,6 +300,29 @@ fn draw_building(
             ctx.fill_rect(px + 1.0, py + 1.0, 4.0, 1.0);
             ctx.fill_rect(px + 2.0, py, 2.0, 1.0);
         }
+        crate::sim::BuildingKind::University => {
+            ctx.set_fill_style_str("rgb(96,74,140)");
+            ctx.fill_rect(px + 1.0, py + 2.0, 4.0, 3.0);
+            ctx.set_fill_style_str("rgb(60,48,92)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 1.0);
+            ctx.set_fill_style_str("rgb(216,180,255)");
+            ctx.fill_rect(px + 1.0, py, 4.0, 1.0);
+        }
+        crate::sim::BuildingKind::Smithy => {
+            ctx.set_fill_style_str("rgb(70,66,60)");
+            ctx.fill_rect(px, py, 6.0, 4.0);
+            ctx.set_fill_style_str("rgb(255,160,60)");
+            ctx.fill_rect(px + 1.0, py + 1.0, 2.0, 1.0);
+            ctx.set_fill_style_str("rgb(190,110,40)");
+            ctx.fill_rect(px + 3.0, py + 2.0, 2.0, 1.0);
+        }
+        crate::sim::BuildingKind::Library => {
+            ctx.set_fill_style_str("rgb(110,96,70)");
+            ctx.fill_rect(px, py, 6.0, 4.0);
+            ctx.set_fill_style_str("rgb(232,214,160)");
+            ctx.fill_rect(px + 1.0, py, 4.0, 1.0);
+            ctx.fill_rect(px + 2.0, py + 1.0, 2.0, 2.0);
+        }
     }
 }
 
@@ -588,6 +611,8 @@ pub fn draw(
             Role::Priest => "rgb(248,242,220)",
             Role::Healer => "rgb(120,220,214)",
             Role::Guard => "rgb(210,120,120)",
+            Role::Scholar => "rgb(202,166,255)",
+            Role::Builder => "rgb(255,194,92)",
         };
         ctx.set_fill_style_str(role_col);
         ctx.fill_rect(fx + 3.0, fy + 2.0, 1.0, 1.0);
@@ -725,6 +750,24 @@ for a in &sim.animals {
         .iter()
         .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Barracks).count())
         .sum();
+    let unis: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::University).count())
+        .sum();
+    let smiths: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Smithy).count())
+        .sum();
+    let libs: usize = sim
+        .towns
+        .iter()
+        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Library).count())
+        .sum();
+    let science: f32 = sim.towns.iter().map(|t| t.dev).sum();
+    let scholars: usize = sim.agents.iter().filter(|a| a.role == Role::Scholar).count();
+    let builders: usize = sim.agents.iter().filter(|a| a.role == Role::Builder).count();
     let sick = sim.agents.iter().filter(|a| a.sick > 0).count();
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let dynasty = sim.families.iter().filter(|f| !f.extinct).count();
@@ -739,7 +782,8 @@ for a in &sim.animals {
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!("tick {}", sim.tick_count));
-    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{} ⛋{} ⛩{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, clinics, walls, barracks, pending));
+    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{} ⛋{} ⛩{}  uni{} sm{} lib{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, clinics, walls, barracks, unis, smiths, libs, pending));
+    lines.push(format!("science {}  scholars {}  builders {}", science as u32, scholars, builders));
     let max_faith = sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0);
     lines.push(format!("вера {}  больны {}", max_faith, sick));
     let plague = sim.towns.iter().any(|t| t.plague_until > 0);
@@ -834,7 +878,7 @@ for a in &sim.animals {
     lines.push(format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }));
     lines.push(String::new());
     lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
-    lines.push("1: 🏠  2: ⛲  3: 🏦  4: 🌾  5: ⛪  6: ⛑  7: ⛋  8: ⛩   C: 🐄   R: новый мир".to_string());
+    lines.push("1: 🏠  2: ⛲  3: 🏦  4: 🌾  5: ⛪  6: ⛑  7: ⛋  8: ⛩  9: 🎓  0: 🔨  Q: 📚   C: 🐄   R: новый мир".to_string());
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
     ctx.fill_rect(4.0, 4.0, 346.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.set_stroke_style_str("rgb(70,78,90)");
