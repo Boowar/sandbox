@@ -588,6 +588,7 @@ impl App {
             "F4" => self.hud.show_diplomacy = !self.hud.show_diplomacy,
             "F6" => self.hud.show_animals = !self.hud.show_animals,
             "F7" => self.hud.show_caravans = !self.hud.show_caravans,
+            "Tab" => self.hud.show_tech_tree = !self.hud.show_tech_tree,
             _ => {}
         }
     }

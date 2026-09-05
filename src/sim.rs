@@ -179,6 +179,81 @@ pub enum TownIdea {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+pub enum Tech {
+    Agriculture,
+    Mining,
+    Construction,
+    Engineering,
+    Cartography,
+    Medicine,
+    Metallurgy,
+    Commerce,
+    Warfare,
+    Philosophy,
+    Theology,
+    Mastery,
+}
+
+impl Tech {
+    pub fn tier(self) -> u32 {
+        match self {
+            Tech::Agriculture | Tech::Mining | Tech::Construction => 0,
+            Tech::Engineering | Tech::Cartography | Tech::Medicine => 1,
+            Tech::Metallurgy | Tech::Commerce | Tech::Warfare => 2,
+            Tech::Philosophy | Tech::Theology | Tech::Mastery => 3,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Tech::Agriculture => "земледелие",
+            Tech::Mining => "горное дело",
+            Tech::Construction => "строительство",
+            Tech::Engineering => "инженерия",
+            Tech::Cartography => "картография",
+            Tech::Medicine => "медицина",
+            Tech::Metallurgy => "металлургия",
+            Tech::Commerce => "торговля",
+            Tech::Warfare => "военное дело",
+            Tech::Philosophy => "философия",
+            Tech::Theology => "теология",
+            Tech::Mastery => "мастерство",
+        }
+    }
+    pub fn desc(self) -> &'static str {
+        match self {
+            Tech::Agriculture => "+25% урожай",
+            Tech::Mining => "+25% руда",
+            Tech::Construction => "+20% строительство",
+            Tech::Engineering => "Университет",
+            Tech::Cartography => "+20% торговля",
+            Tech::Medicine => "-30% чума",
+            Tech::Metallurgy => "Кузница",
+            Tech::Commerce => "+30% цены",
+            Tech::Warfare => "+20% оборона",
+            Tech::Philosophy => "Библиотека",
+            Tech::Theology => "+50% вера",
+            Tech::Mastery => "все бонусы x2",
+        }
+    }
+    pub fn color(self) -> (u8, u8, u8) {
+        match self {
+            Tech::Agriculture => (126, 231, 135),
+            Tech::Mining => (228, 190, 84),
+            Tech::Construction => (200, 205, 215),
+            Tech::Engineering => (202, 166, 255),
+            Tech::Cartography => (88, 166, 255),
+            Tech::Medicine => (120, 220, 214),
+            Tech::Metallurgy => (255, 160, 60),
+            Tech::Commerce => (232, 214, 120),
+            Tech::Warfare => (210, 120, 120),
+            Tech::Philosophy => (180, 140, 240),
+            Tech::Theology => (248, 242, 220),
+            Tech::Mastery => (255, 222, 120),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Role {
     Worker,
     Farmer,
@@ -400,6 +475,7 @@ pub struct Settlement {
     pub prophecy: Prophecy,
     pub prophecy_left: f32,
     pub revelation: f32,
+    pub researched: Vec<Tech>,
     pub plague_until: u64,
     pub empire: Option<usize>,
     pub alive: bool,
@@ -813,6 +889,7 @@ impl Sim {
                 prophecy: Prophecy::None,
                 prophecy_left: 0.0,
                 revelation: 0.0,
+                researched: Vec::new(),
                 plague_until: 0,
                 empire: None,
                 alive: true,
@@ -1465,6 +1542,18 @@ impl Sim {
                 + DEV_LIB_BONUS * lib as f32
                 + DEV_SCHOLAR_BONUS * scholars as f32;
             self.towns[ti].dev += gain;
+            let tier = self.tech_tier(ti);
+            let all_techs: Vec<Tech> = vec![
+                Tech::Agriculture, Tech::Mining, Tech::Construction,
+                Tech::Engineering, Tech::Cartography, Tech::Medicine,
+                Tech::Metallurgy, Tech::Commerce, Tech::Warfare,
+                Tech::Philosophy, Tech::Theology, Tech::Mastery,
+            ];
+            for tech in all_techs {
+                if tech.tier() <= tier && !self.towns[ti].researched.contains(&tech) {
+                    self.towns[ti].researched.push(tech);
+                }
+            }
         }
     }
 
@@ -1539,8 +1628,10 @@ impl Sim {
                 }
                 t.stocks.ore = (t.stocks.ore - 1.0).max(0.0);
                 let (kind, progress) = &mut t.queue[0];
+                let has_constr_tech = t.researched.contains(&Tech::Construction);
                 *progress += if t.idea == TownIdea::Toil { 2.0 } else { 1.0 };
                 *progress += (smithy_bonus + builder_bonus) as f32;
+                if has_constr_tech { *progress += 0.2; }
                 if *progress >= kind.cost() {
                     Some(t.queue.remove(0).0)
                 } else {
@@ -1620,6 +1711,8 @@ impl Sim {
             let abundant = self.towns.iter().any(|t| t.blessing == Blessing::Abundance);
             let proph_harvest = self.towns.iter().any(|t| t.prophecy == Prophecy::Harvest);
             let proph_rain = self.towns.iter().any(|t| t.prophecy == Prophecy::Rain);
+            let has_agri_tech = self.towns.iter().any(|t| t.researched.contains(&Tech::Agriculture));
+            let agri_mult = if has_agri_tech { 1.25 } else { 1.0 };
             let berry = match self.weather {
                 Weather::Rain => 2.0,
                 Weather::Frost => 0.5,
@@ -1653,11 +1746,11 @@ impl Sim {
                     match self.grid[i].terrain {
                         Terrain::Forest if !on_road => {
                             let k = (self.grid[i].food / FOOD_MAX).max(0.3);
-                            let ber = berry * season_berry * k + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 1.5 } else { 0.0 };
+                            let ber = (berry * season_berry * k + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 1.5 } else { 0.0 }) * agri_mult;
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
                         }
                         Terrain::Farm if !on_road => {
-                            let cr = crop * season_crop + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 2.0 } else { 0.0 };
+                            let cr = (crop * season_crop + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 2.0 } else { 0.0 }) * agri_mult;
                             self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
                         }
                         Terrain::Water => {
@@ -1737,7 +1830,8 @@ impl Sim {
             }
             let sanctuaries = t.built.iter().filter(|b| **b == BuildingKind::Sanctuary).count() as f32;
             if sanctuaries > 0.0 {
-                t.faith = (t.faith + FAITH_GAIN_PER_TICK * sanctuaries).min(100.0);
+                let faith_mult = if t.researched.contains(&Tech::Theology) { 1.5 } else { 1.0 };
+                t.faith = (t.faith + FAITH_GAIN_PER_TICK * sanctuaries * faith_mult).min(100.0);
             }
             if t.blessing_left > 0.0 {
                 t.blessing_left -= 1.0;
@@ -3132,6 +3226,7 @@ impl Sim {
             prophecy: Prophecy::None,
             prophecy_left: 0.0,
             revelation: 0.0,
+                researched: Vec::new(),
             plague_until: 0,
             empire: None,
             alive: true,
@@ -3885,6 +3980,9 @@ impl Sim {
         }
         if self.towns[ti].blessing == Blessing::Protection {
             b += 0.15;
+        }
+        if self.towns[ti].researched.contains(&Tech::Warfare) {
+            b += 0.20;
         }
         b
     }
@@ -5646,6 +5744,7 @@ fn marriages_form_and_cheapen_births() {
                 prophecy: Prophecy::None,
                 prophecy_left: 0.0,
                 revelation: 0.0,
+                researched: Vec::new(),
                 plague_until: 0,
                 empire: None,
                 alive: true,

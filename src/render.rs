@@ -16,6 +16,7 @@ pub struct HudConfig {
     pub show_animals: bool,
     pub show_caravans: bool,
     pub show_weather: bool,
+    pub show_tech_tree: bool,
 }
 
 impl Default for HudConfig {
@@ -27,6 +28,7 @@ impl Default for HudConfig {
             show_animals: true,
             show_caravans: true,
             show_weather: true,
+            show_tech_tree: false,
         }
     }
 }
@@ -1082,6 +1084,62 @@ for a in &sim.animals {
         let _ = ctx.fill_text(l, 14.0 + if chips[i].is_some() { 12.0 } else { 0.0 }, 16.0 + i as f64 * 15.0);
     }
 
+    if hud.show_tech_tree {
+        let all_techs = [
+            (crate::sim::Tech::Agriculture, 0), (crate::sim::Tech::Mining, 1), (crate::sim::Tech::Construction, 2),
+            (crate::sim::Tech::Engineering, 0), (crate::sim::Tech::Cartography, 1), (crate::sim::Tech::Medicine, 2),
+            (crate::sim::Tech::Metallurgy, 0), (crate::sim::Tech::Commerce, 1), (crate::sim::Tech::Warfare, 2),
+            (crate::sim::Tech::Philosophy, 0), (crate::sim::Tech::Theology, 1), (crate::sim::Tech::Mastery, 2),
+        ];
+        let town_tech = if let Some(si) = selected_town {
+            sim.towns.get(si).map(|t| &t.researched)
+        } else {
+            None
+        };
+        let pw = 340.0;
+        let ph = 210.0;
+        let px = 4.0;
+        let py = 4.0;
+        ctx.set_fill_style_str("rgba(10,14,18,0.92)");
+        ctx.fill_rect(px, py, pw, ph);
+        ctx.set_stroke_style_str("rgb(60,68,80)");
+        ctx.begin_path();
+        ctx.rect(px, py, pw, ph);
+        ctx.stroke();
+        ctx.set_font("11px ui-monospace, monospace");
+        let tier_names = ["T0", "T1", "T2", "T3"];
+        for tier in 0..4u32 {
+            let ty = py + 16.0 + tier as f64 * 48.0;
+            ctx.set_fill_style_str("rgb(140,155,175)");
+            let _ = ctx.fill_text(&format!("{} {}", tier_names[tier as usize],
+                match tier { 0 => "начальный", 1 => "500", 2 => "1800", _ => "4500" }), px + 8.0, ty);
+            let tier_techs: Vec<_> = all_techs.iter().filter(|(t, _)| t.tier() == tier).collect();
+            for (j, (tech, _)) in tier_techs.iter().enumerate() {
+                let tx = px + 20.0 + j as f64 * 105.0;
+                let ty2 = ty + 6.0;
+                let (cr, cg, cb) = tech.color();
+                let researched = town_tech.map_or(false, |r| r.contains(tech));
+                let alpha = if researched { 1.0 } else { 0.4 };
+                ctx.set_fill_style_str(&format!("rgba({},{},{},{:.1})", cr, cg, cb, alpha));
+                ctx.fill_rect(tx, ty2, 95.0, 38.0);
+                ctx.set_stroke_style_str(&format!("rgb({},{},{})", cr, cg, cb));
+                ctx.begin_path();
+                ctx.rect(tx, ty2, 95.0, 38.0);
+                ctx.stroke();
+                ctx.set_fill_style_str("rgb(220,228,238)");
+                let _ = ctx.fill_text(tech.name(), tx + 4.0, ty2 + 14.0);
+                ctx.set_font("9px ui-monospace, monospace");
+                ctx.set_fill_style_str("rgb(160,180,200)");
+                let _ = ctx.fill_text(tech.desc(), tx + 4.0, ty2 + 28.0);
+                ctx.set_font("11px ui-monospace, monospace");
+                if researched {
+                    ctx.set_fill_style_str("rgb(126,231,135)");
+                    let _ = ctx.fill_text("✓", tx + 82.0, ty2 + 14.0);
+                }
+            }
+        }
+    }
+
     if let Some(si) = selected_town {
         if let Some(t) = sim.towns.get(si) {
             let ruler = sim.families.iter()
@@ -1266,6 +1324,10 @@ for a in &sim.animals {
             }
             if t.faith > 0.0 {
                 p.push(format!("🙏 faith {:.0}", t.faith));
+            }
+            if !t.researched.is_empty() {
+                let techs: Vec<&str> = t.researched.iter().map(|t| t.name()).collect();
+                p.push(format!("🔬 {} ({})", techs.join(", "), t.researched.len()));
             }
             if !war_mark.is_empty() {
                 p.push(war_mark);
