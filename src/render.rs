@@ -116,6 +116,21 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
     }
     for y in 0..H {
         for x in 0..W {
+            let (ax, ay) = (x * ART, y * ART);
+            let c = &sim.grid[y * W + x];
+            let h = hash2(x as i32, y as i32);
+            if c.burn > 0 {
+                fill(&mut buf, ax, ay, ART, ART, 92, 42, 18);
+                set_px(&mut buf, ax + (h % 3) as usize, ay + ((h >> 3) % 3) as usize, 255, 128, 16);
+                set_px(&mut buf, ax + ((h >> 5) % 4) as usize, ay + ((h >> 7) % 4) as usize, 255, 200, 40);
+            } else if c.gold > 0.0 {
+                set_px(&mut buf, ax + 1 + (h % 2) as usize, ay + 1 + ((h >> 3) % 2) as usize, 240, 210, 90);
+                set_px(&mut buf, ax + 2 + ((h >> 5) % 2) as usize, ay + 2 + ((h >> 7) % 2) as usize, 255, 232, 130);
+            }
+        }
+    }
+    for y in 0..H {
+        for x in 0..W {
             if sim.grid[y * W + x].terrain != Terrain::Water {
                 continue;
             }
@@ -784,6 +799,8 @@ for a in &sim.animals {
     lines.push(format!("tick {}", sim.tick_count));
     lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{} ⛋{} ⛩{}  uni{} sm{} lib{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, clinics, walls, barracks, unis, smiths, libs, pending));
     lines.push(format!("science {}  scholars {}  builders {}", science as u32, scholars, builders));
+    let burning: usize = sim.grid.iter().filter(|c| c.burn > 0).count();
+    lines.push(format!("events  fires {}  invades {}  veins {}", burning, sim.invades, sim.gold_veins.len()));
     let max_faith = sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0);
     lines.push(format!("вера {}  больны {}", max_faith, sick));
     let plague = sim.towns.iter().any(|t| t.plague_until > 0);

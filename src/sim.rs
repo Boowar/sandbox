@@ -14,6 +14,18 @@ const RAIN_LAKE_CHANCE: u32 = 700;
 const METEOR_EVERY: u64 = 2400;
 const METEOR_CHANCE_P: u32 = 4000;
 const METEOR_RADIUS: i32 = 3;
+const FIRE_EVERY: u64 = 700;
+const FIRE_CHANCE_P: u32 = 9000;
+const FIRE_LEN: u32 = 40;
+const FIRE_SPREAD_DIV: u64 = 8;
+const HORDE_EVERY: u64 = 1500;
+const HORDE_CHANCE_P: u32 = 8;
+const HORDE_PACK_MAX: usize = 6;
+const GOLD_VEIN_EVERY: u64 = 1500;
+const GOLD_VEIN_CHANCE_P: u32 = 5;
+const GOLD_VEIN_AMOUNT: f32 = 320.0;
+const GOLD_VEIN_PER_TICK: f32 = 0.04;
+const GOLD_VEIN_RANGE: i32 = 24;
 const MIGRATE_EVERY: u64 = 500;
 const MIGRATE_CHANCE_P: u32 = 6;
 const MIGRATE_QUALITY_MARGIN: f32 = 5.0;
@@ -289,6 +301,8 @@ pub struct Cell {
     pub food: f32,
     pub ore: f32,
     pub water: f32,
+    pub burn: u32,
+    pub gold: f32,
 }
 
 pub struct Agent {
@@ -394,6 +408,8 @@ pub struct Sim {
     pub alliances: Vec<(usize, usize, u64)>,
     pub treaties: Vec<(usize, usize, u64)>,
     pub gifts_sent: u32,
+    pub invades: u32,
+    pub gold_veins: Vec<(i32, i32, f32)>,
     pub tick_count: u64,
     pub weather: Weather,
     pub weather_left: f64,
@@ -435,6 +451,8 @@ impl Sim {
             alliances: Vec::new(),
             treaties: Vec::new(),
             gifts_sent: 0,
+            invades: 0,
+            gold_veins: Vec::new(),
             tick_count: 0,
             weather: Weather::Clear,
             weather_left: 0.0,
@@ -448,7 +466,7 @@ impl Sim {
 
     fn make_terrain(rng: &mut u64) -> Vec<Cell> {
         let mut grid = vec![
-            Cell { terrain: Terrain::Grass, food: FOOD_MAX, ore: 0.0, water: 0.0 };
+            Cell { terrain: Terrain::Grass, food: FOOD_MAX, ore: 0.0, water: 0.0, burn: 0, gold: 0.0 };
             W * H
         ];
         for cell in grid.iter_mut() {
@@ -1524,6 +1542,14 @@ impl Sim {
         }
         if self.tick_count % METEOR_EVERY == 0 {
             self.meteor_step();
+        }
+        self.fire_step();
+        if self.tick_count % HORDE_EVERY == 0 {
+            self.horde_step();
+        }
+        self.gold_vein_trickle();
+        if self.tick_count % GOLD_VEIN_EVERY == 0 {
+            self.gold_vein_find();
         }
         if self.tick_count % TECH_EVERY == 0 {
             self.tech_step();
@@ -2744,6 +2770,191 @@ impl Sim {
     fn town_quality(&self, ti: usize) -> f32 {
         let t = &self.towns[ti];
         t.stocks.food + t.stocks.water * 0.7 - (self.pop(ti) as f32 / t.cap.max(1) as f32) * 40.0
+    }
+
+    fn fire_spread(&mut self) {
+        let mut ignites: Vec<usize> = Vec::new();
+        for y in 0..H {
+            for x in 0..W {
+                let i = idx(x as i32, y as i32);
+                if self.grid[i].burn == 0 {
+                    continue;
+                }
+                self.grid[i].burn -= 1;
+                if self.grid[i].burn == 0 {
+                    self.grid[i].terrain = Terrain::Grass;
+                    self.grid[i].food = 0.0;
+                    continue;
+                }
+                if self.brain(x as i32, y as i32, self.tick_count / FIRE_SPREAD_DIV) % 2 == 0 {
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            if dx == 0 && dy == 0 {
+                                continue;
+                            }
+                            let nx = x as i32 + dx;
+                            let ny = y as i32 + dy;
+                            if !in_bounds(nx, ny) {
+                                continue;
+                            }
+                            let ni = idx(nx, ny);
+                            if self.grid[ni].burn == 0
+                                && (self.grid[ni].terrain == Terrain::Forest
+                                    || self.grid[ni].terrain == Terrain::Farm)
+                            {
+                                ignites.push(ni);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for &ni in ignites.iter() {
+            let c = &mut self.grid[ni];
+            if c.burn == 0 && (c.terrain == Terrain::Forest || c.terrain == Terrain::Farm) {
+                c.burn = FIRE_LEN;
+                c.food = c.food.min(2.0);
+            }
+        }
+    }
+
+    fn fire_step(&mut self) {
+        if self.tick_count % FIRE_EVERY == 0 {
+            let epoch = self.tick_count / FIRE_EVERY;
+            for y in 0..H {
+                for x in 0..W {
+                    let i = idx(x as i32, y as i32);
+                    if self.grid[i].terrain != Terrain::Forest || self.grid[i].burn > 0 {
+                        continue;
+                    }
+                    if self.brain(x as i32, y as i32, epoch) % FIRE_CHANCE_P == 0 {
+                        self.grid[i].burn = FIRE_LEN;
+                        self.grid[i].food = self.grid[i].food.min(2.0);
+                        self.fire_spread();
+                        return;
+                    }
+                }
+            }
+        } else {
+            self.fire_spread();
+        }
+    }
+
+    fn horde_step(&mut self) {
+        let epoch = self.tick_count / HORDE_EVERY;
+        for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive || self.animals.len() >= ANIMAL_MAX {
+                continue;
+            }
+            let (tx, ty) = (self.towns[ti].x, self.towns[ti].y);
+            if self.brain(tx, ty, epoch) % HORDE_CHANCE_P != 0 {
+                continue;
+            }
+            let nearby = self
+                .animals
+                .iter()
+                .filter(|a| a.species == Species::Wolf && (a.x - tx).abs().max(a.y - ty) <= 20)
+                .count();
+            if nearby >= 3 {
+                continue;
+            }
+            let pack =
+                3 + (self.brain(tx, ty, epoch.wrapping_add(7)) % (HORDE_PACK_MAX as u32 - 2)) as usize;
+            let base = self.brain(tx, ty, epoch.wrapping_add(13));
+            let mut placed = 0;
+            for k in 0..pack {
+                if self.animals.len() >= ANIMAL_MAX {
+                    break;
+                }
+                let ang = (base.wrapping_add(k as u32 * 97) % 6283) as f64 * 0.001;
+                let r = 8 + ((base >> 5) as usize % 6);
+                let wx = tx + (ang.cos() * r as f64) as i32;
+                let wy = ty + (ang.sin() * r as f64) as i32;
+                if in_bounds(wx, wy) && self.grid[idx(wx, wy)].terrain.walkable() {
+                    self.push_animal(Species::Wolf, wx, wy, None);
+                    placed += 1;
+                }
+            }
+            if placed > 0 {
+                self.invades = self.invades.wrapping_add(1);
+            }
+        }
+    }
+
+    fn gold_vein_find(&mut self) {
+        let epoch = self.tick_count / GOLD_VEIN_EVERY;
+        let mut new_veins: Vec<(i32, i32)> = Vec::new();
+        for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive {
+                continue;
+            }
+            let (tx, ty) = (self.towns[ti].x, self.towns[ti].y);
+            if self.brain(tx, ty, epoch) % GOLD_VEIN_CHANCE_P != 0 {
+                continue;
+            }
+            let has_near = self
+                .gold_veins
+                .iter()
+                .any(|&(vx, vy, _)| (tx - vx).abs().max(ty - vy) <= GOLD_VEIN_RANGE);
+            if has_near {
+                continue;
+            }
+            let mut cands: Vec<(i32, i32)> = Vec::new();
+            for dy in -16i32..=16 {
+                for dx in -16i32..=16 {
+                    let d = dx.abs().max(dy.abs());
+                    if d < 5 || d > 16 {
+                        continue;
+                    }
+                    let nx = tx + dx;
+                    let ny = ty + dy;
+                    if in_bounds(nx, ny) && self.grid[idx(nx, ny)].terrain.walkable() {
+                        cands.push((nx, ny));
+                    }
+                }
+            }
+            if cands.is_empty() {
+                continue;
+            }
+            let pick = cands[(self.brain(tx, ty, epoch.wrapping_add(3)) as usize) % cands.len()];
+            new_veins.push(pick);
+        }
+        for (x, y) in new_veins {
+            let c = &mut self.grid[idx(x, y)];
+            c.terrain = Terrain::Hills;
+            c.ore = 0.0;
+            c.food = 0.0;
+            c.water = 0.0;
+            c.gold = GOLD_VEIN_AMOUNT;
+            self.gold_veins.push((x, y, GOLD_VEIN_AMOUNT));
+        }
+    }
+
+    fn gold_vein_trickle(&mut self) {
+        let veins = std::mem::take(&mut self.gold_veins);
+        for (vx, vy, mut amt) in veins {
+            let mut n = 0;
+            for t in &self.towns {
+                if t.alive && (t.x - vx).abs().max(t.y - vy) <= GOLD_VEIN_RANGE {
+                    n += 1;
+                }
+            }
+            let give = GOLD_VEIN_PER_TICK * n as f32;
+            if give > 0.0 {
+                for t in &mut self.towns {
+                    if t.alive && (t.x - vx).abs().max(t.y - vy) <= GOLD_VEIN_RANGE {
+                        t.stocks.gold = (t.stocks.gold + give).min(GOLD_MAX);
+                    }
+                }
+                amt -= give;
+            }
+            if amt <= 0.0 {
+                self.grid[idx(vx, vy)].gold = 0.0;
+            } else {
+                self.grid[idx(vx, vy)].gold = amt;
+                self.gold_veins.push((vx, vy, amt));
+            }
+        }
     }
 
     fn migration_step(&mut self) {
@@ -5068,5 +5279,146 @@ fn marriages_form_and_cheapen_births() {
             s.towns[0].built.iter().any(|b| *b == BuildingKind::Barracks),
             "barracks should complete"
         );
+    }
+
+    #[test]
+    fn forest_fire_burns_and_expires_leaving_grass() {
+        let mut s = Sim::new(50);
+        for c in s.grid.iter_mut() {
+            c.burn = 0;
+            c.gold = 0.0;
+        }
+        let fi = s
+            .grid
+            .iter()
+            .position(|c| c.terrain == Terrain::Forest)
+            .unwrap();
+        s.grid[fi].burn = FIRE_LEN;
+        s.grid[fi].food = 8.0;
+        let (fx, fy) = (fi as i32 % W as i32, fi as i32 / W as i32);
+        let mut saw_burn = false;
+        let mut saw_spread = false;
+        for t in 0..(FIRE_LEN + 8) {
+            s.tick_count = t as u64;
+            s.fire_spread();
+            if s.grid[fi].burn > 0 {
+                saw_burn = true;
+            }
+            for ny in -1..=1 {
+                for nx in -1..=1 {
+                    if nx == 0 && ny == 0 {
+                        continue;
+                    }
+                    let sx = fx + nx;
+                    let sy = fy + ny;
+                    if in_bounds(sx, sy) && s.grid[idx(sx, sy)].burn > 0 {
+                        saw_spread = true;
+                    }
+                }
+            }
+        }
+        assert!(saw_burn, "the lit cell should burn for a while");
+        assert_eq!(s.grid[fi].burn, 0, "fire must burn out");
+        let c = &s.grid[fi];
+        assert_eq!(c.terrain, Terrain::Grass, "burned forest becomes grass");
+        assert!(c.food <= 0.01, "burned terrain holds no food");
+        assert!(saw_spread, "fire should be able to spread to neighbors");
+    }
+
+    #[test]
+    fn generated_fire_event_lights_a_forest() {
+        let mut s = Sim::new(51);
+        for c in s.grid.iter_mut() {
+            c.burn = 0;
+            c.gold = 0.0;
+        }
+        let mut any = false;
+        for e in 1..40u64 {
+            s.tick_count = e * FIRE_EVERY;
+            s.fire_step();
+            if s.grid.iter().any(|c| c.burn > 0) {
+                any = true;
+                break;
+            }
+        }
+        assert!(any, "fire events should eventually ignite a forest over many epochs");
+    }
+
+    #[test]
+    fn wolf_hordes_swarm_near_a_town() {
+        let mut s = Sim::new(60);
+        for a in s.animals.iter_mut() {
+            a.species = Species::Deer;
+        }
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        let mut any_horde = false;
+        for e in 1..30u64 {
+            s.tick_count = e * HORDE_EVERY;
+            s.horde_step();
+            let near = s
+                .animals
+                .iter()
+                .filter(|a| a.species == Species::Wolf && (a.x - tx).abs().max(a.y - ty) <= 20)
+                .count();
+            if near >= 3 {
+                any_horde = true;
+                break;
+            }
+        }
+        assert!(
+            any_horde,
+            "an uneasy town should eventually draw a wolf horde"
+        );
+    }
+
+    #[test]
+    fn gold_vein_pays_outstanding_gold_to_surrounding_towns() {
+        let mut s = Sim::new(77);
+        s.agents.clear();
+        s.towns[0].stocks = Stock { food: 50.0, water: 50.0, ore: 10.0, meat: 5.0, gold: 0.0 };
+        s.towns[0].x = 40;
+        s.towns[0].y = 40;
+        s.gold_veins.clear();
+        let vx = 50;
+        let vy = 50;
+        s.gold_veins.push((vx, vy, 400.0));
+        s.grid[idx(vx, vy)].gold = 400.0;
+        s.gold_vein_trickle();
+        assert!(
+            s.towns[0].stocks.gold > 0.0,
+            "a vein in range should feed gold to the town"
+        );
+        assert!(
+            s.towns[0].stocks.gold <= GOLD_MAX + 0.001,
+            "gold must respect the town cap"
+        );
+        let still = s.gold_veins.iter().any(|&(x, y, _)| x == vx && y == vy);
+        assert!(still, "a rich vein should not exhaust in a single tick");
+    }
+
+    #[test]
+    fn gold_vein_spawns_near_a_town() {
+        let mut s = Sim::new(78);
+        for c in s.grid.iter_mut() {
+            c.gold = 0.0;
+            c.burn = 0;
+        }
+        s.gold_veins.clear();
+        s.towns[0].x = 50;
+        s.towns[0].y = 50;
+        let mut any = false;
+        for e in 1..30u64 {
+            s.tick_count = e * GOLD_VEIN_EVERY;
+            s.gold_vein_find();
+            if !s.gold_veins.is_empty() {
+                any = true;
+                break;
+            }
+        }
+        assert!(any, "a vein should eventually appear near a town");
+        for &(vx, vy, _) in &s.gold_veins {
+            assert_eq!(s.grid[idx(vx, vy)].terrain, Terrain::Hills, "vein sits in hills");
+            assert!(s.grid[idx(vx, vy)].gold > 0.0, "vein cell holds gold");
+        }
     }
 }
