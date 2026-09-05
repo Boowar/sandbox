@@ -1450,8 +1450,12 @@ impl Sim {
                 .iter()
                 .filter(|a| a.home == ti && a.role == Role::Builder)
                 .count();
+            let pop_ti = self.pop(ti);
             let apply = {
                 let t = &mut self.towns[ti];
+                if t.queue.is_empty() && pop_ti >= t.cap {
+                    t.queue.push((BuildingKind::House, 0.0));
+                }
                 if t.queue.is_empty() {
                     continue;
                 }
@@ -1461,7 +1465,7 @@ impl Sim {
                 if t.stocks.ore < 1.0 {
                     continue;
                 }
-                t.stocks.ore -= 1.0;
+                t.stocks.ore = (t.stocks.ore - 1.0).max(0.0);
                 let (kind, progress) = &mut t.queue[0];
                 *progress += if t.idea == TownIdea::Toil { 2.0 } else { 1.0 };
                 *progress += (smithy_bonus + builder_bonus) as f32;
@@ -1939,7 +1943,7 @@ impl Sim {
     }
 
     fn cheb(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
-        (x1 - x2).abs().max(y1 - y2)
+        (x1 - x2).abs().max((y1 - y2).abs())
     }
 
     fn nearest_agent(&self, x: i32, y: i32, max_d: i32) -> Option<(i32, i32)> {
@@ -2099,7 +2103,10 @@ impl Sim {
     }
 
     fn decide(&self, a: &Agent) -> (Action, ResourceKind) {
-        if a.sick == 0 && (a.hunger >= STARVE || a.thirst >= STARVE) {
+        if a.hunger >= STARVE || a.thirst >= STARVE {
+            return (Action::Die, a.want);
+        }
+        if a.sick > 0 && (a.hunger >= 120.0 || a.thirst >= 120.0) {
             return (Action::Die, a.want);
         }
         if a.raider {
@@ -2140,7 +2147,7 @@ impl Sim {
             let hungry = a.hunger >= HUNGRY_AT
                 && (self.towns[a.home].stocks.food > 0.0 || self.towns[a.home].stocks.meat > 0.0);
             let thirsty = a.thirst >= THIRSTY_AT && self.towns[a.home].stocks.water > 0.0;
-            if hungry || thirsty {
+            if a.energy < 30.0 || hungry || thirsty {
                 let (nx, ny) = self.steer(a, hx, hy);
                 (Action::Move(nx, ny), a.want)
             } else {
@@ -2514,10 +2521,10 @@ impl Sim {
                 let ti = self.agents[i].home;
                 let mut ate = false;
                 if self.towns[ti].stocks.food > 0.0 {
-                    self.towns[ti].stocks.food -= 2.0;
+                    self.towns[ti].stocks.food = (self.towns[ti].stocks.food - 2.0).max(0.0);
                     ate = true;
                 } else if self.towns[ti].stocks.meat > 0.0 {
-                    self.towns[ti].stocks.meat -= 2.0;
+                    self.towns[ti].stocks.meat = (self.towns[ti].stocks.meat - 2.0).max(0.0);
                     ate = true;
                 }
                 if ate {
@@ -2529,7 +2536,7 @@ impl Sim {
             Action::Drink => {
                 let ti = self.agents[i].home;
                 if self.towns[ti].stocks.water > 0.0 {
-                    self.towns[ti].stocks.water -= 2.0;
+                    self.towns[ti].stocks.water = (self.towns[ti].stocks.water - 2.0).max(0.0);
                     let a = &mut self.agents[i];
                     a.thirst = (a.thirst - 30.0).max(0.0);
                     a.energy = (a.energy + 2.0).min(100.0);
@@ -2752,8 +2759,8 @@ impl Sim {
             } else {
                 (BIRTH_FOOD, BIRTH_WATER)
             };
-            self.towns[fam_town].stocks.food -= cf;
-            self.towns[fam_town].stocks.water -= cw;
+            self.towns[fam_town].stocks.food = (self.towns[fam_town].stocks.food - cf).max(0.0);
+            self.towns[fam_town].stocks.water = (self.towns[fam_town].stocks.water - cw).max(0.0);
             self.spawn_agent(fam_town, tx, ty, fid, false);
             let newborn = self.agents.len() - 1;
             self.agents[newborn].age = 0;
@@ -3602,6 +3609,7 @@ impl Sim {
     fn muster_army(&mut self, ti: usize, count: u32) {
         let enemy = self.towns[ti].enemy;
         let mut left = count;
+        let mut actual = 0u32;
         for i in 0..self.agents.len() {
             if left == 0 {
                 break;
@@ -3610,9 +3618,10 @@ impl Sim {
                 self.agents[i].raider = true;
                 self.agents[i].target_town = enemy;
                 left -= 1;
+                actual += 1;
             }
         }
-        self.towns[ti].raiders = count;
+        self.towns[ti].raiders = actual;
     }
 
     fn release_dead_raiders(&mut self, dead: &[usize]) {
@@ -3700,11 +3709,11 @@ impl Sim {
         let Some(j) = self.agents[i].target_town else {
             return;
         };
-        if j >= self.towns.len() || !self.towns[j].at_war {
+        if j >= self.towns.len() {
             return;
         }
         let (ex, ey) = (self.towns[j].x, self.towns[j].y);
-        let d = (my_x - ex).abs().max(my_y - ey);
+        let d = (my_x - ex).abs().max((my_y - ey).abs());
         if d <= 4 {
             let t = &mut self.towns[j];
             let take_f = t.stocks.food.min(3.0);
@@ -4131,6 +4140,8 @@ mod tests {
         s.agents.retain(|a| !(a.home == 0));
         let ridx = s.agents.len();
         s.spawn_agent(0, ex + 1, ey, 0, false);
+        s.agents[ridx].x = ex + 1;
+        s.agents[ridx].y = ey;
         let r = &mut s.agents[ridx];
         r.raider = true;
         r.target_town = Some(1);
@@ -4200,7 +4211,7 @@ mod tests {
         let mut s = Sim::new(40);
         prep_two_towns(&mut s);
         s.form_empire(0, 1);
-        let id_a = s.empire_of(0).unwrap();
+        let _id_a = s.empire_of(0).unwrap();
         let id_b = s.empires.len();
         s.empires.push(Empire {
             r: 10,
