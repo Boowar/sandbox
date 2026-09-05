@@ -502,7 +502,9 @@ impl App {
                 life: 26.0,
             });
         }
-        self.build_cursor += 1;
+        if self.selected_town.is_none() {
+            self.build_cursor += 1;
+        }
     }
 
     fn on_key(&mut self, e: KeyboardEvent) {
