@@ -831,149 +831,111 @@ for a in &sim.animals {
         ctx.fill_rect(e.x - 1.0, e.y - 1.0, 2.0, 2.0);
     }
 
-    let houses: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::House).count())
-        .sum();
-    let wells: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Well).count())
-        .sum();
-    let farms: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Farm).count())
-        .sum();
-    let posts: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::TradePost).count())
-        .sum();
-    let sanctuaries: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Sanctuary).count())
-        .sum();
-    let clinics: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Clinic).count())
-        .sum();
-    let walls: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Wall).count())
-        .sum();
-    let barracks: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Barracks).count())
-        .sum();
-    let unis: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::University).count())
-        .sum();
-    let smiths: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Smithy).count())
-        .sum();
-    let libs: usize = sim
-        .towns
-        .iter()
-        .map(|t| t.built.iter().filter(|b| **b == crate::sim::BuildingKind::Library).count())
-        .sum();
+    let count_building = |sim: &Sim, kind: crate::sim::BuildingKind| -> usize {
+        sim.towns.iter().map(|t| t.built.iter().filter(|b| **b == kind).count()).sum()
+    };
+    let (houses, wells, farms, posts, clinics, walls, barracks) = (
+        count_building(sim, crate::sim::BuildingKind::House), count_building(sim, crate::sim::BuildingKind::Well),
+        count_building(sim, crate::sim::BuildingKind::Farm), count_building(sim, crate::sim::BuildingKind::TradePost),
+        count_building(sim, crate::sim::BuildingKind::Clinic), count_building(sim, crate::sim::BuildingKind::Wall),
+        count_building(sim, crate::sim::BuildingKind::Barracks),
+    );
     let science: f32 = sim.towns.iter().map(|t| t.dev).sum();
     let scholars: usize = sim.agents.iter().filter(|a| a.role == Role::Scholar).count();
     let builders: usize = sim.agents.iter().filter(|a| a.role == Role::Builder).count();
     let sick = sim.agents.iter().filter(|a| a.sick > 0).count();
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
-    let dynasty = sim.families.iter().filter(|f| !f.extinct).count();
-    let extinct = sim.families.len() - dynasty;
-    let ideas = sim.towns.iter().filter(|t| t.idea != TownIdea::None).count();
+    let wars = sim.towns.iter().filter(|t| t.at_war).count();
+    let ruins = sim.towns.iter().filter(|t| !t.alive).count();
     let weather_name = match sim.weather {
-        Weather::Clear => "☀ ясно",
-        Weather::Rain => "🌧 дождь",
-        Weather::Heat => "🔥 жара",
-        Weather::Frost => "❄ мороз",
+        Weather::Clear => "☀", Weather::Rain => "🌧", Weather::Heat => "🔥", Weather::Frost => "❄",
     };
     let season_name = match sim.season {
-        Season::Spring => "весна",
-        Season::Summer => "лето",
-        Season::Autumn => "осень",
-        Season::Winter => "зима",
+        Season::Spring => "🌱 весна", Season::Summer => "☀ лето",
+        Season::Autumn => "🍂 осень", Season::Winter => "❄ зима",
     };
-    let day_name = if sim.is_day() { "☀ день" } else { "🌙 ночь" };
+    let day_name = if sim.is_day() { "☀" } else { "🌙" };
+
+    let resource_icon = |v: f32, max: f32| -> &'static str {
+        let r = v / max;
+        if r > 0.6 { "●" } else if r > 0.3 { "◐" } else if r > 0.0 { "○" } else { "·" }
+    };
+    let mood_bar = |m: f32| -> &'static str {
+        let p = ((m.clamp(-1.0, 1.0) + 1.0) / 2.0 * 5.0) as usize;
+        ["🔴","🟠","🟡","🟢","💚","💙"][p.min(5)]
+    };
+
     let _ = ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     let mut lines: Vec<String> = Vec::new();
-    lines.push(format!("tick {}  {}  {}", sim.tick_count, season_name, day_name));
-    lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{} ⛋{} ⛩{}  uni{} sm{} lib{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, clinics, walls, barracks, unis, smiths, libs, pending));
-    lines.push(format!("science {}  scholars {}  builders {}", science as u32, scholars, builders));
+    let mut line_colors: Vec<Option<(u8, u8, u8)>> = Vec::new();
+
+    lines.push(format!("{} {}  {}  tick {}", day_name, season_name, weather_name, sim.tick_count));
+    line_colors.push(None);
+
     let avg_mood: f32 = if sim.agents.is_empty() { 0.0 } else { sim.agents.iter().map(|a| a.mood).sum::<f32>() / sim.agents.len() as f32 };
     let mood_icon = if avg_mood > 0.3 { "😊" } else if avg_mood < -0.3 { "😠" } else { "😐" };
-    lines.push(format!("mood {:.2} {}  links {}", avg_mood, mood_icon, sim.social_links.len()));
-    let burning: usize = sim.grid.iter().filter(|c| c.burn > 0).count();
-    lines.push(format!("events  fires {}  invades {}  veins {}", burning, sim.invades, sim.gold_veins.len()));
+    lines.push(format!("👥 {}  {} {:.2}  ⚔{} 💀{}", sim.agents.len(), mood_icon, avg_mood, wars, ruins));
+    line_colors.push(None);
+
+    lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, pending));
+    line_colors.push(None);
+
+    lines.push(format!("📚 sci {:.0}  👨‍🎓{}  🔨{}  🤝{}", science, scholars, builders, sim.social_links.len()));
+    line_colors.push(None);
+
     let max_faith = sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0);
-    lines.push(format!("вера {}  больны {}", max_faith, sick));
+    if sick > 0 || max_faith > 0 {
+        lines.push(format!("💀 sick {}  🙏 faith {}", sick, max_faith));
+        line_colors.push(None);
+    }
+
     let plague = sim.towns.iter().any(|t| t.plague_until > 0);
     if plague {
-        lines.push("☠ ЧУМА! Постройте лечебницу ⛑ и целителей".to_string());
-    }
-    let bless_name = match sim
-        .towns
-        .iter()
-        .find(|t| t.blessing != crate::sim::Blessing::None)
-        .map(|t| t.blessing)
-    {
-        Some(crate::sim::Blessing::Fertility) => "7 плодородие",
-        Some(crate::sim::Blessing::Abundance) => "7 изобилие",
-        Some(crate::sim::Blessing::Protection) => "7 защита",
-        _ => "",
-    };
-    if !bless_name.is_empty() {
-        lines.push(format!("благословение: {}", bless_name));
+        lines.push("☠ ЧУМА! Постройте лечебницу ⛑".to_string());
+        line_colors.push(Some((255, 60, 60)));
     }
     let mut town_rows: Vec<(usize, usize)> = Vec::new();
     for (i, t) in sim.towns.iter().enumerate() {
-        let ruler = sim
-            .families
-            .iter()
+        let ruler = sim.families.iter()
             .filter(|f| f.town == i && !f.extinct)
             .max_by_key(|f| f.members)
             .map(|f| f.name.as_str())
             .filter(|n| !n.is_empty())
             .unwrap_or("?");
+        let (cr, cg, cb) = town_col[i];
         if !t.alive {
             let row = lines.len();
-            lines.push(format!("☠ {}  разорён", ruler));
+            lines.push(format!("◆ {}  ☠ разорён", ruler));
+            line_colors.push(Some((cr, cg, cb)));
             town_rows.push((row, i));
             continue;
         }
-        let mark = if t.at_war {
-            "  ⚔"
-        } else {
+        let pop = sim.pop(i);
+        let mark = if t.at_war { "⚔" } else {
             match t.idea {
-                TownIdea::None => "",
-                TownIdea::War => "  ⚔",
-                TownIdea::Prosperity => "  🌿",
-                TownIdea::Toil => "  🔨",
+                TownIdea::War => "⚔", TownIdea::Prosperity => "🌿", TownIdea::Toil => "🔨", _ => "",
             }
         };
-        let emp_mark = t
-            .empire
-            .and_then(|e| sim.empires.get(e))
-            .map(|emp| format!("  ⚑{}", emp.name))
-            .unwrap_or_default();
+        let emp_mark = t.empire.and_then(|e| sim.empires.get(e))
+            .map(|emp| format!(" ⚑{}", emp.name)).unwrap_or_default();
+        let town_mood: f32 = {
+            let agents: Vec<_> = sim.agents.iter().filter(|a| a.home == i).collect();
+            if agents.is_empty() { 0.0 } else { agents.iter().map(|a| a.mood).sum::<f32>() / agents.len() as f32 }
+        };
+        let mood_s = mood_bar(town_mood);
+        let f = resource_icon(t.stocks.food, 120.0);
+        let w = resource_icon(t.stocks.water, 120.0);
+        let o = resource_icon(t.stocks.ore, 60.0);
+        let m = resource_icon(t.stocks.meat, 60.0);
+        let g = resource_icon(t.stocks.gold, 30.0);
         let row = lines.len();
         lines.push(format!(
-            "{} {}  pop {}  f{} w{} o{} m{} g{}{}{}",
-            "◆", ruler, sim.pop(i),
-            t.stocks.food as i32, t.stocks.water as i32, t.stocks.ore as i32, t.stocks.meat as i32, t.stocks.gold as i32, mark, emp_mark
+            "◆ {} {} pop {}  {}{}{}{}{}  f{:<5.0} w{:<5.0} o{:<4.0} m{:<4.0} g{:<3.0}{}{}",
+            mood_s, ruler, pop, f, w, o, m, g,
+            t.stocks.food, t.stocks.water, t.stocks.ore, t.stocks.meat, t.stocks.gold,
+            if mark.is_empty() { String::new() } else { format!(" {}", mark) }, emp_mark
         ));
+        line_colors.push(Some((cr, cg, cb)));
         town_rows.push((row, i));
     }
     let empires_line = sim
@@ -1003,22 +965,29 @@ for a in &sim.animals {
             .filter(|a| a.species == Species::Cow && a.home.is_some())
             .count()
     ));
-    lines.push(format!("dynasties {}  extinct {}  ideas {}  wars {}  ruins {}  migrants {}  allies {}  treaties {}  gifts {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count(), sim.towns.iter().filter(|t| !t.alive).count(), sim.migrations, sim.alliances.len(), sim.treaties.len(), sim.gifts_sent));
     let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
     let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
-    lines.push(format!("gold {}  caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
-    lines.push(format!("workers {}  farmers {}  miners {}  hunters {}", sim.agents.iter().filter(|a| a.role == Role::Worker).count(), sim.agents.iter().filter(|a| a.role == Role::Farmer).count(), sim.agents.iter().filter(|a| a.role == Role::Miner).count(), sim.agents.iter().filter(|a| a.role == Role::Hunter).count()));
-    lines.push(format!("{} {:>3.0}s  fps {:.0}  speed x{:.1}{}", weather_name, sim.weather_left * 0.08, fps, speed, if paused { "  [PAUSED]" } else { "" }));
-    lines.push(String::new());
-    lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
-    lines.push("1: 🏠  2: ⛲  3: 🏦  4: 🌾  5: ⛪  6: ⛑  7: ⛋  8: ⛩  9: 🎓  0: 🔨  Q: 📚   C: 🐄   R: новый мир".to_string());
-    ctx.set_fill_style_str("rgba(10,14,18,0.72)");
-    ctx.fill_rect(4.0, 4.0, 346.0, 14.0 + lines.len() as f64 * 15.0);
-    ctx.set_stroke_style_str("rgb(70,78,90)");
+    lines.push(format!("💰 {}g  🐫 caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
+    line_colors.push(None);
+
+    let (mut deer, mut boar, mut wolf, mut cow) = (0, 0, 0, 0);
+    for a in &sim.animals {
+        match a.species {
+            Species::Deer => deer += 1, Species::Boar => boar += 1, Species::Wolf => wolf += 1, Species::Cow => cow += 1,
+        }
+    }
+    lines.push(format!("🦌{} 🐗{} 🐺{} 🐄{}  {} {:.0}s  x{:.1}  fps{:.0}{}", deer, boar, wolf, cow, weather_name, sim.weather_left * 0.08, speed, fps, if paused { " [PAUSED]" } else { "" }));
+    line_colors.push(None);
+
+    let pw = 350.0;
+    let ph = 14.0 + lines.len() as f64 * 15.0;
+    ctx.set_fill_style_str("rgba(10,14,18,0.78)");
+    ctx.fill_rect(4.0, 4.0, pw, ph);
+    ctx.set_stroke_style_str("rgb(60,68,80)");
     ctx.begin_path();
-    ctx.rect(4.0, 4.0, 346.0, 14.0 + lines.len() as f64 * 15.0);
+    ctx.rect(4.0, 4.0, pw, ph);
     ctx.stroke();
-    ctx.set_font("13px ui-monospace, monospace");
+    ctx.set_font("12px ui-monospace, monospace");
     let mut chips: Vec<Option<(u8, u8, u8)>> = vec![None; lines.len()];
     for (row, ti) in town_rows {
         let t = &sim.towns[ti];
@@ -1029,9 +998,14 @@ for a in &sim.animals {
         if let Some((r, g, b)) = chips[i] {
             ctx.set_fill_style_str(&format!("rgb({},{},{})", r, g, b));
             ctx.fill_rect(10.0, 13.0 + i as f64 * 15.0, 10.0, 10.0);
+        } else if let Some((r, g, b)) = line_colors[i] {
+            ctx.set_fill_style_str(&format!("rgb({},{},{})", r, g, b));
+        } else if i <= 1 {
+            ctx.set_fill_style_str("rgb(180,195,215)");
+        } else {
+            ctx.set_fill_style_str("rgb(220,228,238)");
         }
-        ctx.set_fill_style_str(if i == 2 { "rgb(255,222,120)" } else { "rgb(238,243,247)" });
-        let _ = ctx.fill_text(l, if chips[i].is_some() { 26.0 } else { 10.0 }, 22.0 + i as f64 * 15.0);
+        let _ = ctx.fill_text(l, 14.0 + if chips[i].is_some() { 12.0 } else { 0.0 }, 16.0 + i as f64 * 15.0);
     }
 
     if let Some(si) = selected_town {
@@ -1064,7 +1038,6 @@ for a in &sim.animals {
             let wells = build_counts(crate::sim::BuildingKind::Well);
             let farms = build_counts(crate::sim::BuildingKind::Farm);
             let posts = build_counts(crate::sim::BuildingKind::TradePost);
-            let sanct = build_counts(crate::sim::BuildingKind::Sanctuary);
             let clinic = build_counts(crate::sim::BuildingKind::Clinic);
             let wall = build_counts(crate::sim::BuildingKind::Wall);
             let barracks = build_counts(crate::sim::BuildingKind::Barracks);
@@ -1106,19 +1079,43 @@ for a in &sim.animals {
                 .collect();
 
             let mut p: Vec<String> = Vec::new();
+            let mood_s = mood_bar(avg_mood);
+            let mood_bar_vis = {
+                let len = ((avg_mood.clamp(-1.0, 1.0) + 1.0) / 2.0 * 10.0) as usize;
+                let mut bar = String::from("[");
+                for j in 0..10 {
+                    if j < len { bar.push('█'); } else { bar.push('░'); }
+                }
+                bar.push(']');
+                bar
+            };
             p.push(format!("═══ {} ═══", ruler));
-            p.push(format!("pop {} / {}  |  mood {:.2}{}", pop, t.cap, avg_mood,
-                if sick_n > 0 { format!("  sick {}", sick_n) } else { String::new() }));
+            p.push(format!("👥 {}/{}  {} {:.2} {}", pop, t.cap, mood_s, avg_mood, mood_bar_vis));
+            if sick_n > 0 { p.push(format!("  💀 sick {}", sick_n)); }
             p.push(String::new());
-            p.push(format!(" еда {:>5.0}  вода {:>5.0}  руда {:>5.0}", t.stocks.food, t.stocks.water, t.stocks.ore));
-            p.push(format!(" мясо {:>5.0}  золото {:>5.0}", t.stocks.meat, t.stocks.gold));
+
+            let res_bar = |v: f32, max: f32| -> String {
+                let len = ((v / max).clamp(0.0, 1.0) * 8.0) as usize;
+                let mut bar = String::new();
+                for j in 0..8 {
+                    if j < len { bar.push('█'); } else { bar.push('░'); }
+                }
+                bar
+            };
+            p.push(format!(" 🌾 food  {:>5.0} [{}]", t.stocks.food, res_bar(t.stocks.food, 120.0)));
+            p.push(format!(" 💧 water {:>5.0} [{}]", t.stocks.water, res_bar(t.stocks.water, 120.0)));
+            p.push(format!(" ⛏ ore   {:>5.0} [{}]", t.stocks.ore, res_bar(t.stocks.ore, 60.0)));
+            p.push(format!(" 🥩 meat  {:>5.0} [{}]", t.stocks.meat, res_bar(t.stocks.meat, 60.0)));
+            p.push(format!(" 💰 gold  {:>5.0} [{}]", t.stocks.gold, res_bar(t.stocks.gold, 30.0)));
             p.push(String::new());
-            p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{}", houses, wells, farms, posts, sanct, clinic));
-            p.push(format!("⛋{} ⛩{} 🎓{} 🔨{} 📚{}", wall, barracks, uni, smith, lib));
+
+            p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
+            p.push(format!("⛩{} 🎓{} 🔨{} 📚{}", barracks, uni, smith, lib));
             if !t.queue.is_empty() {
-                p.push(format!("  build: {} ({:.0}%)", queue_str, t.queue[0].1 * 100.0));
+                p.push(format!(" ⏳ {} ({:.0}%)", queue_str, t.queue[0].1 * 100.0));
             }
             p.push(String::new());
+            let mut role_line = String::new();
             for (r, c) in &role_counts {
                 if *c > 0 {
                     let icon = match r {
@@ -1126,57 +1123,61 @@ for a in &sim.animals {
                         Role::Hunter => "🏹", Role::Builder => "🔨", Role::Healer => "💚",
                         Role::Priest => "🙏", Role::Scholar => "🎓", Role::Guard => "⚔",
                     };
-                    p.push(format!(" {} {}×{}", icon, format!("{:?}", r), c));
+                    role_line.push_str(&format!("{}{} ", icon, c));
                 }
+            }
+            if !role_line.is_empty() {
+                p.push(format!(" {}", role_line.trim()));
             }
             p.push(String::new());
             if !families.is_empty() {
                 let fam_str = families.iter().map(|f| {
-                    format!("{} ({}{}, {}{})", f.name, f.members, if f.children > 0 { format!("+{}", f.children) } else { String::new() },
-                        if f.role != Role::Worker { format!("{:?}", f.role) } else { String::new() },
-                        "")
+                    let role_s = if f.role != Role::Worker { format!("{:?}", f.role) } else { String::new() };
+                    format!("{} ({}{}, {})", f.name, f.members, if f.children > 0 { format!("+{}", f.children) } else { String::new() }, role_s)
                 }).collect::<Vec<_>>().join("  ");
-                p.push(format!("династии: {}", fam_str));
+                p.push(format!("👑 {}", fam_str));
             }
             if !emp_name.is_empty() {
-                p.push(format!("империя: {}", emp_name));
+                p.push(format!("⚑ {}", emp_name));
             }
             if !idea_name.is_empty() {
-                p.push(format!("идея: {}  ({:.0} тиков)", idea_name, t.idea_left));
+                p.push(format!("💡 {} ({}.0 тик.)", idea_name, t.idea_left as u32));
             }
             if !bless_name.is_empty() {
-                p.push(format!("благословение: {}  ({:.0} тиков)", bless_name, t.blessing_left));
+                p.push(format!("✨ {} ({}.0 тик.)", bless_name, t.blessing_left as u32));
             }
             if t.plague_until > 0 {
                 p.push("☠ ЧУМА!".to_string());
             }
             if t.faith > 0.0 {
-                p.push(format!("вера: {:.0}", t.faith));
+                p.push(format!("🙏 faith {:.0}", t.faith));
             }
             if !war_mark.is_empty() {
                 p.push(war_mark);
             }
-            p.push(format!("наука: {:.1}", t.dev));
+            p.push(format!("📚 science {:.1}", t.dev));
             if !t.alive {
                 p.push("☠ РАЗОРЁН".to_string());
             }
 
-            let pw = 220.0;
+            let pw = 230.0;
             let ph = 14.0 + p.len() as f64 * 15.0;
             let px = 4.0;
             let py = 4.0 + 14.0 + lines.len() as f64 * 15.0 + 8.0;
-            ctx.set_fill_style_str("rgba(10,14,18,0.88)");
+            ctx.set_fill_style_str("rgba(10,14,18,0.90)");
             ctx.fill_rect(px, py, pw, ph);
             ctx.set_stroke_style_str(&format!("rgb({},{},{})", cr, cg, cb));
             ctx.begin_path();
             ctx.rect(px, py, pw, ph);
             ctx.stroke();
-            ctx.set_font("13px ui-monospace, monospace");
+            ctx.set_font("12px ui-monospace, monospace");
             for (i, l) in p.iter().enumerate() {
                 if i == 0 {
                     ctx.set_fill_style_str(&format!("rgb({},{},{})", cr, cg, cb));
+                } else if l.starts_with('[') || l.contains("░") || l.contains("█") {
+                    ctx.set_fill_style_str("rgb(160,180,200)");
                 } else {
-                    ctx.set_fill_style_str("rgb(238,243,247)");
+                    ctx.set_fill_style_str("rgb(220,228,238)");
                 }
                 let _ = ctx.fill_text(l, px + 8.0, py + 14.0 + i as f64 * 15.0);
             }
