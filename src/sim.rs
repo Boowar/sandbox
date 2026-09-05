@@ -330,6 +330,7 @@ pub struct Agent {
     pub hunger: f32,
     pub thirst: f32,
     pub energy: f32,
+    pub mood: f32,
     pub want: ResourceKind,
     pub carry: Option<(ResourceKind, f32)>,
     pub family: usize,
@@ -417,6 +418,23 @@ pub struct Caravan {
     pub gift: bool,
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct SocialLink {
+    pub a: usize,
+    pub b: usize,
+    pub bond: f32,
+}
+
+const MOOD_NEAR_FRIEND: f32 = 0.008;
+const MOOD_NEAR_ENEMY: f32 = -0.012;
+const MOOD_FED: f32 = 0.005;
+const MOOD_HUNGRY: f32 = -0.008;
+const MOOD_PROSPER: f32 = 0.004;
+const MOOD_LINK_DECAY: f32 = 0.001;
+const MOOD_MIGRATE_THRESHOLD: f32 = -0.4;
+const FRIEND_RANGE: i32 = 8;
+const SOCIAL_LINK_CHANCE: u64 = 200;
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Sim {
     pub grid: Vec<Cell>,
@@ -427,6 +445,7 @@ pub struct Sim {
     pub animals: Vec<Animal>,
     pub caravans: Vec<Caravan>,
     pub roads: Vec<bool>,
+    pub social_links: Vec<SocialLink>,
     pub migrations: u32,
     pub alliances: Vec<(usize, usize, u64)>,
     pub treaties: Vec<(usize, usize, u64)>,
@@ -473,6 +492,7 @@ impl Sim {
             animals: Vec::new(),
             caravans: Vec::new(),
             roads: vec![false; W * H],
+            social_links: Vec::new(),
             migrations: 0,
             alliances: Vec::new(),
             treaties: Vec::new(),
@@ -807,6 +827,7 @@ impl Sim {
                     hunger: rfrac(&mut self.rng) * 20.0,
                     thirst: rfrac(&mut self.rng) * 20.0,
                     energy: 80.0 + rfrac(&mut self.rng) * 20.0,
+                    mood: 0.0,
                     want: ResourceKind::Food,
                     carry: None,
                     family,
@@ -830,6 +851,7 @@ impl Sim {
             hunger: 10.0,
             thirst: 10.0,
             energy: 90.0,
+            mood: 0.0,
             want: ResourceKind::Food,
             carry: None,
             family,
@@ -1657,6 +1679,7 @@ impl Sim {
         self.caravans_step();
         self.market_buy();
         self.export_caravans();
+        self.social_step();
         self.plague_step();
         self.heal_step();
 
@@ -2535,6 +2558,85 @@ impl Sim {
         self.towns.iter().any(|t| t.blessing == Blessing::Protection)
     }
 
+    fn social_step(&mut self) {
+        let epoch = self.tick_count;
+        let n = self.agents.len();
+        for i in 0..n {
+            let (ix, iy, ihome, ihunger, ithirst, ifamily) = {
+                let a = &self.agents[i];
+                (a.x, a.y, a.home, a.hunger, a.thirst, a.family)
+            };
+            let mut mood_delta = 0.0;
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                let a2 = &self.agents[j];
+                let dx = (a2.x - ix).abs();
+                let dy = (a2.y - iy).abs();
+                if dx > FRIEND_RANGE || dy > FRIEND_RANGE {
+                    continue;
+                }
+                let d = dx.max(dy);
+                if a2.family == ifamily {
+                    mood_delta += MOOD_NEAR_FRIEND / (d as f32 + 1.0);
+                } else if d <= 3 {
+                    mood_delta += MOOD_NEAR_ENEMY / (d as f32 + 1.0);
+                }
+            }
+            if ihunger < 30.0 {
+                mood_delta += MOOD_FED;
+            } else if ihunger >= HUNGRY_AT {
+                mood_delta += MOOD_HUNGRY;
+            }
+            if ithirst >= THIRSTY_AT {
+                mood_delta += MOOD_HUNGRY;
+            }
+            if ihome < self.towns.len() {
+                let t = &self.towns[ihome];
+                if t.alive && t.stocks.food > 50.0 && t.stocks.water > 40.0 {
+                    mood_delta += MOOD_PROSPER;
+                }
+            }
+            if self.agents[i].sick > 0 {
+                mood_delta -= 0.01;
+            }
+            self.agents[i].mood = (self.agents[i].mood + mood_delta).clamp(-1.0, 1.0);
+        }
+        if epoch % SOCIAL_LINK_CHANCE == 0 && n > 1 {
+            let i = (self.brain(0, 0, epoch) as usize) % n;
+            let j = (self.brain(1, 1, epoch) as usize) % n;
+            if i != j {
+                let dx = (self.agents[i].x - self.agents[j].x).abs();
+                let dy = (self.agents[i].y - self.agents[j].y).abs();
+                if dx <= FRIEND_RANGE && dy <= FRIEND_RANGE {
+                    let bond = if self.agents[i].family == self.agents[j].family {
+                        0.5
+                    } else {
+                        -0.3
+                    };
+                    if let Some(link) = self.social_links.iter_mut().find(|l| {
+                        (l.a == i && l.b == j) || (l.a == j && l.b == i)
+                    }) {
+                        link.bond = (link.bond + bond * 0.1).clamp(-1.0, 1.0);
+                    } else {
+                        self.social_links.push(SocialLink { a: i, b: j, bond });
+                    }
+                }
+            }
+        }
+        self.social_links.retain(|l| {
+            l.bond.abs() > MOOD_LINK_DECAY && l.a < n && l.b < n
+        });
+        for link in self.social_links.iter_mut() {
+            if link.bond > 0.0 {
+                link.bond = (link.bond - MOOD_LINK_DECAY).max(0.0);
+            } else {
+                link.bond = (link.bond + MOOD_LINK_DECAY).min(0.0);
+            }
+        }
+    }
+
     fn plague_step(&mut self) {
         for ti in 0..self.towns.len() {
             if !self.towns[ti].alive {
@@ -3190,9 +3292,10 @@ impl Sim {
             if a.hunger < HUNGRY_AT || a.thirst < THIRSTY_AT {
                 continue;
             }
+            let mood_wander = a.mood < MOOD_MIGRATE_THRESHOLD;
             let hx = a.x;
             let hy = a.y;
-            if self.brain(hx, hy, epoch) % MIGRATE_CHANCE_P != 0 {
+            if self.brain(hx, hy, epoch) % MIGRATE_CHANCE_P != 0 && !mood_wander {
                 continue;
             }
             let home = a.home;
@@ -4331,6 +4434,7 @@ mod tests {
             hunger: 50.0,
             thirst: 90.0,
             energy: 100.0,
+            mood: 0.0,
             want: ResourceKind::Water,
             carry: None,
             family: 0,
@@ -5123,6 +5227,7 @@ mod tests {
             hunger: 80.0,
             thirst: 80.0,
             energy: 100.0,
+            mood: 0.0,
             want: ResourceKind::Food,
             carry: None,
             family: 0,

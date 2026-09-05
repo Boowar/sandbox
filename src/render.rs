@@ -706,6 +706,13 @@ pub fn draw(
             ctx.set_fill_style_str(col);
             ctx.fill_rect(fx + 1.0, fy - 1.0, 3.0, 1.0);
         }
+        if a.mood < -0.5 {
+            ctx.set_fill_style_str("rgba(220,60,60,0.7)");
+            ctx.fill_rect(fx + 1.0, fy - 3.0, 2.0, 1.0);
+        } else if a.mood > 0.5 {
+            ctx.set_fill_style_str("rgba(80,220,100,0.7)");
+            ctx.fill_rect(fx + 1.0, fy - 3.0, 2.0, 1.0);
+        }
     }
 
 for a in &sim.animals {
@@ -891,6 +898,9 @@ for a in &sim.animals {
     lines.push(format!("tick {}  {}  {}", sim.tick_count, season_name, day_name));
     lines.push(format!("pop {}  🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{} ⛋{} ⛩{}  uni{} sm{} lib{}  in_queue {}", sim.agents.len(), houses, wells, farms, posts, sanctuaries, clinics, walls, barracks, unis, smiths, libs, pending));
     lines.push(format!("science {}  scholars {}  builders {}", science as u32, scholars, builders));
+    let avg_mood: f32 = if sim.agents.is_empty() { 0.0 } else { sim.agents.iter().map(|a| a.mood).sum::<f32>() / sim.agents.len() as f32 };
+    let mood_icon = if avg_mood > 0.3 { "😊" } else if avg_mood < -0.3 { "😠" } else { "😐" };
+    lines.push(format!("mood {:.2} {}  links {}", avg_mood, mood_icon, sim.social_links.len()));
     let burning: usize = sim.grid.iter().filter(|c| c.burn > 0).count();
     lines.push(format!("events  fires {}  invades {}  veins {}", burning, sim.invades, sim.gold_veins.len()));
     let max_faith = sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0);
