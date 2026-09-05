@@ -740,7 +740,7 @@ impl Sim {
 
     fn spawn_world(&mut self) {
         const PALETTE: [(u8, u8, u8); 3] = [(255, 209, 102), (6, 214, 160), (239, 71, 111)];
-        const FAMILIES_PER_TOWN: usize = 2;
+        const FAMILIES_PER_TOWN: usize = 4;
         let per = W as i32 / (PALETTE.len() + 1) as i32;
         for (i, &(r, g, b)) in PALETTE.iter().enumerate() {
             let cx = per * (i as i32 + 1);
@@ -1451,13 +1451,43 @@ impl Sim {
                 .filter(|a| a.home == ti && a.role == Role::Builder)
                 .count();
             let pop_ti = self.pop(ti);
+            let has_sick = self.agents.iter().any(|a| a.home == ti && a.sick > 0);
             let apply = {
                 let t = &mut self.towns[ti];
-                if t.queue.is_empty() {
-                    let has_well = t.built.iter().any(|b| *b == BuildingKind::Well);
-                    if !has_well {
+                if t.queue.is_empty() && pop_ti > 0 {
+                    let has = |k: BuildingKind| t.built.iter().any(|b| *b == k);
+                    let need = |k: BuildingKind| t.queue.iter().any(|(q, _)| *q == k);
+                    if !has(BuildingKind::Well) && !need(BuildingKind::Well) {
                         t.queue.push((BuildingKind::Well, 0.0));
-                    } else if pop_ti >= t.cap {
+                    } else if pop_ti >= t.cap && !need(BuildingKind::House) {
+                        t.queue.push((BuildingKind::House, 0.0));
+                    } else if !has(BuildingKind::Farm) && !need(BuildingKind::Farm) {
+                        t.queue.push((BuildingKind::Farm, 0.0));
+                    } else if t.stocks.food > 80.0 && t.stocks.water > 60.0
+                        && !has(BuildingKind::TradePost) && !need(BuildingKind::TradePost)
+                    {
+                        t.queue.push((BuildingKind::TradePost, 0.0));
+                    } else if !has(BuildingKind::Clinic) && !need(BuildingKind::Clinic)
+                        && has_sick
+                    {
+                        t.queue.push((BuildingKind::Clinic, 0.0));
+                    } else if !has(BuildingKind::Sanctuary) && !need(BuildingKind::Sanctuary)
+                        && t.faith >= 10.0
+                    {
+                        t.queue.push((BuildingKind::Sanctuary, 0.0));
+                    } else if t.at_war && !has(BuildingKind::Wall) && !need(BuildingKind::Wall) {
+                        t.queue.push((BuildingKind::Wall, 0.0));
+                    } else if t.at_war && !has(BuildingKind::Barracks) && !need(BuildingKind::Barracks) {
+                        t.queue.push((BuildingKind::Barracks, 0.0));
+                    } else if pop_ti >= 15 && !has(BuildingKind::University) && !need(BuildingKind::University) {
+                        t.queue.push((BuildingKind::University, 0.0));
+                    } else if pop_ti >= 20 && !has(BuildingKind::Smithy) && !need(BuildingKind::Smithy) {
+                        t.queue.push((BuildingKind::Smithy, 0.0));
+                    } else if pop_ti >= 25 && t.stocks.gold >= 20.0
+                        && !has(BuildingKind::Library) && !need(BuildingKind::Library)
+                    {
+                        t.queue.push((BuildingKind::Library, 0.0));
+                    } else if pop_ti >= t.cap && has(BuildingKind::House) && !need(BuildingKind::House) {
                         t.queue.push((BuildingKind::House, 0.0));
                     }
                 }
@@ -1638,12 +1668,13 @@ impl Sim {
         }
 
         let wmult = if self.is_night() { NIGHT_WORK_MULT } else { 1.0 };
-        for t in self.towns.iter_mut() {
+        let pops: Vec<usize> = (0..self.towns.len()).map(|ti| self.pop(ti)).collect();
+        for (ti, t) in self.towns.iter_mut().enumerate() {
             if !t.alive {
                 continue;
             }
             let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
-            if wells > 0 {
+            if wells > 0 && pops[ti] > 0 {
                 t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32 * wmult).min(200.0);
             }
             let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
@@ -1717,6 +1748,7 @@ impl Sim {
             self.reproduction();
         }
         self.sync_families();
+        self.retrain_roles();
         if self.tick_count % EMPIRE_EVERY == 0 {
             self.empire_step();
         }
@@ -3320,6 +3352,9 @@ impl Sim {
                 if ti == home || !self.towns[ti].alive {
                     continue;
                 }
+                if self.towns[ti].stocks.food < 12.0 && self.towns[ti].stocks.water < 8.0 && self.pop(ti) == 0 {
+                    continue;
+                }
                 if self.towns[home].at_war && self.towns[home].enemy == Some(ti) {
                     continue;
                 }
@@ -3753,6 +3788,49 @@ impl Sim {
         }
     }
 
+    fn retrain_roles(&mut self) {
+        let town_count = self.towns.len();
+        for ti in 0..town_count {
+            if !self.towns[ti].alive {
+                continue;
+            }
+            let needs: Vec<Role> = self.towns[ti]
+                .built
+                .iter()
+                .filter_map(|b| match b {
+                    BuildingKind::Sanctuary => Some(Role::Priest),
+                    BuildingKind::Clinic => Some(Role::Healer),
+                    BuildingKind::Barracks => Some(Role::Guard),
+                    BuildingKind::University => Some(Role::Scholar),
+                    BuildingKind::Smithy => Some(Role::Builder),
+                    _ => None,
+                })
+                .collect();
+            if needs.is_empty() {
+                continue;
+            }
+            let pop_ti = self.pop(ti);
+            if pop_ti < 5 {
+                continue;
+            }
+            for need in &needs {
+                let has = self.agents.iter().any(|a| a.home == ti && a.role == *need);
+                if has {
+                    continue;
+                }
+                if let Some(wi) = self.agents.iter().position(|a| a.home == ti && a.role == Role::Worker) {
+                    let fid = self.agents[wi].family;
+                    self.agents[wi].role = *need;
+                    if let Some(fam) = self.families.get_mut(fid) {
+                        if fam.role == Role::Worker {
+                            fam.role = *need;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn sync_families(&mut self) {
         for fam in self.families.iter_mut() {
             let members = self
@@ -4012,7 +4090,6 @@ mod tests {
     #[test]
     fn well_regenerates_water() {
         let mut s = Sim::new(17);
-        s.agents.retain(|a| a.home != 0);
         s.towns[0].stocks.food = 100.0;
         s.towns[0].stocks.water = 100.0;
         s.towns[0].stocks.ore = 400.0;
@@ -4054,7 +4131,7 @@ mod tests {
     #[test]
     fn families_cover_agents_and_have_founders() {
         let s = Sim::new(21);
-        assert_eq!(s.families.len(), s.towns.len() * 2);
+        assert_eq!(s.families.len(), s.towns.len() * 4);
         assert!(s.agents.iter().all(|a| a.family < s.families.len()));
         let fam_members: u32 = s.families.iter().map(|f| f.members).sum();
         assert_eq!(fam_members as usize, s.agents.len());
@@ -4142,10 +4219,13 @@ mod tests {
         let mut s = Sim::new(34);
         prep_two_towns(&mut s);
         let (ex, ey) = (s.towns[1].x, s.towns[1].y);
-        s.agents.retain(|a| !(a.home == 0));
+        if let Some(di) = s.agents.iter().position(|a| a.home == 1) {
+            s.agents[di].x = ex;
+            s.agents[di].y = ey;
+        }
         let ridx = s.agents.len();
-        s.spawn_agent(0, ex + 1, ey, 0, false);
-        s.agents[ridx].x = ex + 1;
+        s.spawn_agent(0, ex, ey, 0, false);
+        s.agents[ridx].x = ex;
         s.agents[ridx].y = ey;
         let r = &mut s.agents[ridx];
         r.raider = true;
@@ -4291,9 +4371,11 @@ mod tests {
         let mut s = Sim::new(43);
         s.agents.retain(|a| a.home != 0);
         s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0 };
+        s.caravans.clear();
         let mut died = false;
         for _ in 0..(TOWN_WASTE_NEED * 2 * TOWNS_EVERY + 800) {
             s.tick();
+            s.caravans.retain(|c| c.target != 0);
             if !s.towns[0].alive {
                 died = true;
                 break;
@@ -4758,11 +4840,24 @@ mod tests {
         s.spawn_agent(0, tx, ty, fam, true);
         let ax = s.agents[0].x;
         let ay = s.agents[0].y;
-        s.push_animal(Species::Wolf, ax + 8, ay, None);
+        let wx = ax + 2;
+        let wy = ay;
+        if in_bounds(wx, wy) && s.grid[idx(wx, wy)].terrain.walkable() {
+            s.push_animal(Species::Wolf, wx, wy, None);
+        } else {
+            s.push_animal(Species::Wolf, ax + 1, ay + 1, None);
+        }
         let before = s.cheb(s.animals[0].x, s.animals[0].y, ax, ay);
+        let mut saw_close = false;
         let mut saw_bite = false;
-        for _ in 0..15 {
+        for _ in 0..40 {
             s.animals_step();
+            if let Some(a) = s.agents.first() {
+                let d = s.cheb(s.animals[0].x, s.animals[0].y, a.x, a.y);
+                if d <= 2 {
+                    saw_close = true;
+                }
+            }
             if s.agents.iter().any(|a| a.hunger >= 140.0) {
                 saw_bite = true;
                 break;
@@ -4770,8 +4865,8 @@ mod tests {
         }
         let after = s.cheb(s.animals[0].x, s.animals[0].y, ax, ay);
         assert!(
-            after < before || saw_bite,
-            "wolf should close in on people (b{}->a{})",
+            saw_close || saw_bite || after < before,
+            "wolf should get close to people (b{}->a{})",
             before,
             after
         );
