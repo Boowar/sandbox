@@ -17,6 +17,15 @@ const METEOR_RADIUS: i32 = 3;
 const MIGRATE_EVERY: u64 = 500;
 const MIGRATE_CHANCE_P: u32 = 6;
 const MIGRATE_QUALITY_MARGIN: f32 = 5.0;
+const MARRIAGE_EVERY: u64 = 900;
+const MARRIAGE_CHANCE_P: u32 = 5;
+const MARRIAGE_LENGTH: u64 = 3000;
+const GIFT_EVERY: u64 = 300;
+const GIFT_MIN_FOOD: f32 = 80.0;
+const GIFT_MIN_WATER: f32 = 60.0;
+const TREATY_EVERY: u64 = 1200;
+const TREATY_CHANCE_P: u32 = 7;
+const TREATY_LENGTH: u64 = 6000;
 const SEEK_RADIUS: i32 = 26;
 const HOME_BOUND: f32 = 14.0;
 const HUNGRY_AT: f32 = 60.0;
@@ -348,6 +357,7 @@ pub struct Caravan {
     pub x: i32,
     pub y: i32,
     pub goods: Vec<(ResourceKind, f32)>,
+    pub gift: bool,
 }
 
 pub struct Sim {
@@ -359,6 +369,9 @@ pub struct Sim {
     pub animals: Vec<Animal>,
     pub caravans: Vec<Caravan>,
     pub migrations: u32,
+    pub alliances: Vec<(usize, usize, u64)>,
+    pub treaties: Vec<(usize, usize, u64)>,
+    pub gifts_sent: u32,
     pub tick_count: u64,
     pub weather: Weather,
     pub weather_left: f64,
@@ -397,6 +410,9 @@ impl Sim {
             animals: Vec::new(),
             caravans: Vec::new(),
             migrations: 0,
+            alliances: Vec::new(),
+            treaties: Vec::new(),
+            gifts_sent: 0,
             tick_count: 0,
             weather: Weather::Clear,
             weather_left: 0.0,
@@ -944,22 +960,24 @@ impl Sim {
             if target == ti {
                 continue;
             }
-            self.caravans.push(Caravan { home: ti, target, x, y, goods });
+            self.caravans.push(Caravan { home: ti, target, x, y, goods, gift: false });
         }
     }
 
     fn caravans_step(&mut self) {
         for i in 0..self.caravans.len() {
-            let (home, target, x, y) = {
+            let (home, target, x, y, gift) = {
                 let c = &self.caravans[i];
-                (c.home, c.target, c.x, c.y)
+                (c.home, c.target, c.x, c.y, c.gift)
             };
             let (tx, ty) = (self.towns[target].x, self.towns[target].y);
             if self.cheb(x, y, tx, ty) <= 1 {
                 let goods = std::mem::take(&mut self.caravans[i].goods);
-                let gold: f32 = goods.iter().map(|(k, q)| q * trade_price(*k)).sum();
-                let s = &mut self.towns[home].stocks;
-                s.gold = (s.gold + gold).min(GOLD_MAX);
+                if !gift {
+                    let gold: f32 = goods.iter().map(|(k, q)| q * trade_price(*k)).sum();
+                    let s = &mut self.towns[home].stocks;
+                    s.gold = (s.gold + gold).min(GOLD_MAX);
+                }
                 let st = &mut self.towns[target].stocks;
                 for (k, q) in &goods {
                     match k {
@@ -1355,6 +1373,13 @@ impl Sim {
         if self.tick_count % MIGRATE_EVERY == 0 {
             self.migration_step();
         }
+        if self.tick_count % MARRIAGE_EVERY == 0 {
+            self.marriage_step();
+        }
+        if self.tick_count % TREATY_EVERY == 0 {
+            self.treaty_step();
+        }
+        self.gift_step();
         if self.tick_count % TOWNS_EVERY == 0 {
             self.town_lifecycle();
         }
@@ -2264,6 +2289,8 @@ impl Sim {
                 || self.towns[fam_town].blessing == Blessing::Fertility
             {
                 (BIRTH_FOOD * 0.5, BIRTH_WATER * 0.5)
+            } else if self.has_alliance(fam_town) {
+                (BIRTH_FOOD * 0.8, BIRTH_WATER * 0.8)
             } else {
                 (BIRTH_FOOD, BIRTH_WATER)
             };
@@ -2647,6 +2674,168 @@ impl Sim {
         }
     }
 
+    fn has_alliance(&self, ti: usize) -> bool {
+        self.alliances
+            .iter()
+            .any(|&(a, b, until)| until > self.tick_count && (a == ti || b == ti))
+    }
+
+    fn alliance_between(&self, i: usize, j: usize) -> bool {
+        let (a, b) = if i < j { (i, j) } else { (j, i) };
+        self.alliances
+            .iter()
+            .any(|&(x, y, until)| x == a && y == b && until > self.tick_count)
+    }
+
+    fn treaty_between(&self, i: usize, j: usize) -> bool {
+        match (self.empire_of(i), self.empire_of(j)) {
+            (Some(a), Some(b)) if a != b => {
+                let (x, y) = if a < b { (a, b) } else { (b, a) };
+                self.treaties
+                    .iter()
+                    .any(|&(p, q, until)| p == x && q == y && until > self.tick_count)
+            }
+            _ => false,
+        }
+    }
+
+    fn peaceful(&self, i: usize, j: usize) -> bool {
+        self.same_empire(i, j) || self.alliance_between(i, j) || self.treaty_between(i, j)
+    }
+
+    fn marriage_step(&mut self) {
+        let epoch = self.tick_count / MARRIAGE_EVERY;
+        for i in 0..self.towns.len() {
+            if !self.towns[i].alive || self.towns[i].at_war {
+                continue;
+            }
+            let tx = self.towns[i].x;
+            let ty = self.towns[i].y;
+            if self.brain(tx, ty, epoch) % MARRIAGE_CHANCE_P != 0 {
+                continue;
+            }
+            let fam_ok = |s: &Sim, town: usize| {
+                s.families
+                    .iter()
+                    .any(|f| f.town == town && !f.extinct && f.members >= 2)
+            };
+            if !fam_ok(self, i) {
+                continue;
+            }
+            let mut best: Option<(usize, u32)> = None;
+            for j in 0..self.towns.len() {
+                if j == i
+                    || !self.towns[j].alive
+                    || self.towns[j].at_war
+                    || !self.neighbors(i, j)
+                    || self.alliance_between(i, j)
+                    || self.same_empire(i, j)
+                {
+                    continue;
+                }
+                if !fam_ok(self, j) {
+                    continue;
+                }
+                let h = self.brain(
+                    tx ^ self.towns[j].x,
+                    ty ^ self.towns[j].y,
+                    epoch.wrapping_mul(3),
+                ) % 1000;
+                if best.map(|(_, bh)| h < bh).unwrap_or(true) {
+                    best = Some((j, h));
+                }
+            }
+            if let Some((j, _)) = best {
+                let (a, b) = if i < j { (i, j) } else { (j, i) };
+                self.alliances.push((a, b, self.tick_count + MARRIAGE_LENGTH));
+            }
+        }
+    }
+
+    fn gift_step(&mut self) {
+        if self.tick_count % GIFT_EVERY != 0 || self.caravans.len() >= CARAVAN_MAX {
+            return;
+        }
+        for ti in 0..self.towns.len() {
+            if self.caravans.len() >= CARAVAN_MAX {
+                break;
+            }
+            if !self.towns[ti].alive || self.towns[ti].at_war {
+                continue;
+            }
+            let (f, w, x, y) = {
+                let t = &self.towns[ti];
+                (t.stocks.food, t.stocks.water, t.x, t.y)
+            };
+            if f < GIFT_MIN_FOOD || w < GIFT_MIN_WATER {
+                continue;
+            }
+            let ally = self
+                .alliances
+                .iter()
+                .filter(|&&(a, b, until)| until > self.tick_count && (a == ti || b == ti))
+                .map(|&(a, b, _)| if a == ti { b } else { a })
+                .find(|&tj| tj != ti && self.towns[tj].alive && !self.towns[tj].at_war);
+            if let Some(tj) = ally {
+                let give_f = (f - GIFT_MIN_FOOD).min(30.0);
+                let give_w = (w - GIFT_MIN_WATER).min(20.0);
+                let mut goods = Vec::new();
+                if give_f >= 5.0 {
+                    goods.push((ResourceKind::Food, give_f));
+                }
+                if give_w >= 5.0 {
+                    goods.push((ResourceKind::Water, give_w));
+                }
+                if goods.is_empty() {
+                    continue;
+                }
+                let st = &mut self.towns[ti].stocks;
+                for (k, q) in &goods {
+                    match k {
+                        ResourceKind::Food => st.food -= q,
+                        ResourceKind::Water => st.water -= q,
+                        _ => {}
+                    }
+                }
+                self.caravans.push(Caravan { home: ti, target: tj, x, y, goods, gift: true });
+                self.gifts_sent = self.gifts_sent.wrapping_add(1);
+            }
+        }
+    }
+
+    fn treaty_step(&mut self) {
+        let epoch = self.tick_count / TREATY_EVERY;
+        let count = self.empires.len();
+        for a in 0..count {
+            if self.empires[a].members.is_empty() {
+                continue;
+            }
+            let anchor = self.empires[a].members[0];
+            if self.brain(self.towns[anchor].x, self.towns[anchor].y, epoch) % TREATY_CHANCE_P != 0 {
+                continue;
+            }
+            for b in (a + 1)..count {
+                if self.empires[b].members.is_empty() {
+                    continue;
+                }
+                let neighboring = self.empires[a].members.iter().any(|&ti| {
+                    self.empires[b].members.iter().any(|&tj| self.neighbors(ti, tj))
+                });
+                if !neighboring {
+                    continue;
+                }
+                if self.treaties.iter().any(|&(x, y, until)| {
+                    until > self.tick_count && ((x == a && y == b) || (x == b && y == a))
+                }) {
+                    continue;
+                }
+                let (x, y) = (a.min(b), a.max(b));
+                self.treaties.push((x, y, self.tick_count + TREATY_LENGTH));
+                break;
+            }
+        }
+    }
+
     fn war_step(&mut self) {
         for i in 0..self.towns.len() {
             if !self.towns[i].alive {
@@ -2654,7 +2843,9 @@ impl Sim {
             }
             if self.towns[i].at_war {
                 if let Some(enemy) = self.towns[i].enemy {
-                    if enemy < self.towns.len() && (self.same_empire(i, enemy) || !self.towns[enemy].alive) {
+                    if enemy < self.towns.len()
+                        && (self.peaceful(i, enemy) || !self.towns[enemy].alive)
+                    {
                         self.end_war(i);
                         continue;
                     }
@@ -2700,7 +2891,7 @@ impl Sim {
                 || !self.towns[j].alive
                 || self.towns[j].at_war
                 || !self.neighbors(ti, j)
-                || self.same_empire(ti, j)
+                || self.peaceful(ti, j)
                 || self.pop(j) < RAID_TARGET_POP
             {
                 continue;
@@ -4423,5 +4614,213 @@ fn migration_relocates_adults_to_better_town() {
             }
         }
         panic!("no seed produced a migration over 4 windows");
+    }
+
+    fn craft_families(s: &mut Sim) {
+        s.agents.clear();
+        s.families.clear();
+        for t in 0..s.towns.len() {
+            s.families.push(Family {
+                id: t,
+                town: t,
+                members: 2,
+                children: 0,
+                name: format!("Род {}", t),
+                extinct: false,
+                accent: (200, 100, 100),
+                role: Role::Worker,
+            });
+        }
+    }
+
+#[test]
+fn marriages_form_and_cheapen_births() {
+        for seed in 1..40u64 {
+            let mut s = Sim::new(seed);
+            if s.towns.len() < 2 {
+                continue;
+            }
+            s.towns[0].x = s.towns[0].x.wrapping_add((seed % 11) as i32 * 7);
+            s.towns[0].y = s.towns[0].y.wrapping_add((seed % 5) as i32 * 3);
+            s.towns[1].x = s.towns[0].x + 20;
+            s.towns[1].y = s.towns[0].y;
+            craft_families(&mut s);
+            s.tick_count = MARRIAGE_EVERY;
+            s.marriage_step();
+            if s.alliances.is_empty() {
+                continue;
+            }
+            assert!(s.alliance_between(0, 1), "marriage should ally the two towns");
+            assert!(s.has_alliance(0), "aligned town should report its alliance");
+            s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 20.0, meat: 20.0, gold: 0.0 };
+            s.towns[0].cap = 40;
+            let start = s.towns[0].stocks.food;
+            s.reproduction();
+            let cost = start - s.towns[0].stocks.food;
+            assert!(cost > 0.0, "married families should still have children");
+            assert!(cost < BIRTH_FOOD - 0.1, "marriage should cheapen births (cost {})", cost);
+            return;
+        }
+        panic!("no seed formed a marriage alliance");
+    }
+
+    fn ensure_extra_towns(s: &mut Sim, want: usize) {
+        while s.towns.len() < want {
+            let li = s.towns.len() - 1;
+            let (bx, by) = (s.towns[li].x + 30, s.towns[li].y);
+            s.towns.push(Settlement {
+                x: bx,
+                y: by,
+                stocks: Stock { food: 40.0, water: 30.0, ore: 10.0, meat: 6.0, gold: 0.0 },
+                r: 200,
+                g: 200,
+                b: 200,
+                cap: 12,
+                queue: Vec::new(),
+                built: Vec::new(),
+                at_war: false,
+                raiders: 0,
+                enemy: None,
+                idea: TownIdea::None,
+                idea_left: 0.0,
+                faith: 0.0,
+                blessing: Blessing::None,
+                blessing_left: 0.0,
+                plague_until: 0,
+                empire: None,
+                alive: true,
+                waste: 0,
+            });
+        }
+    }
+
+    #[test]
+    fn allied_and_treaty_towns_never_become_enemies() {
+        for seed in 1..6u64 {
+            let mut s = Sim::new(seed);
+            ensure_extra_towns(&mut s, 4);
+            let ox = s.towns[0].x;
+            let oy = s.towns[0].y;
+            s.towns[0].x = ox + (seed % 7) as i32 * 9;
+            s.towns[0].y = oy;
+            s.towns[1].x = s.towns[0].x + 20;
+            s.towns[1].y = s.towns[0].y;
+            craft_families(&mut s);
+            s.towns[0].stocks = Stock { food: 300.0, water: 300.0, ore: 50.0, meat: 30.0, gold: 0.0 };
+            s.towns[0].cap = 60;
+            s.alliances.push((0, 1, u64::MAX));
+            s.towns[0].empire = Some(0);
+            s.towns[1].empire = Some(0);
+            s.towns[2].empire = Some(1);
+            s.towns[3].empire = Some(1);
+            s.towns[2].x = s.towns[1].x + 20;
+            s.towns[2].y = s.towns[1].y;
+            s.empires.push(Empire { r: 220, g: 40, b: 40, name: "A".into(), members: vec![0, 1] });
+            s.empires.push(Empire { r: 40, g: 40, b: 220, name: "B".into(), members: vec![2, 3] });
+            s.tick_count = TREATY_EVERY;
+            s.treaty_step();
+            assert!(s.alliance_between(0, 1), "forced alliance must be active");
+            let peaceful_pair = s.alliance_between(0, 1)
+                || (s.empire_of(0).is_some() && s.empire_of(2).is_some() && s.treaty_between(0, 2));
+            assert!(peaceful_pair, "seed {} should hold at least one peaceful tie", seed);
+            for _ in 0..1500 {
+                s.tick();
+                for i in 0..s.towns.len() {
+                    for j in (i + 1)..s.towns.len() {
+                        if s.peaceful(i, j)
+                            && ((s.towns[i].at_war && s.towns[i].enemy == Some(j))
+                                || (s.towns[j].at_war && s.towns[j].enemy == Some(i)))
+                        {
+                            panic!("a peaceful partner became an enemy (seed {} tick {})", seed, s.tick_count);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        unreachable!();
+    }
+
+    #[test]
+    fn gifts_flow_from_surplus_town_to_ally() {
+        let mut s = Sim::new(7);
+        s.alliances.push((0, 1, u64::MAX));
+        s.towns[0].stocks = Stock { food: 500.0, water: 500.0, ore: 20.0, meat: 10.0, gold: 0.0 };
+        s.towns[1].stocks = Stock { food: 5.0, water: 5.0, ore: 5.0, meat: 5.0, gold: 0.0 };
+        s.towns[0].x = 60;
+        s.towns[0].y = 60;
+        s.towns[1].x = 61;
+        s.towns[1].y = 60;
+        s.tick_count = GIFT_EVERY;
+        s.gift_step();
+        assert!(!s.caravans.is_empty(), "surplus ally should send a free gift caravan");
+        let gift = s.caravans[0].gift && s.caravans[0].home == 0 && s.caravans[0].target == 1;
+        assert!(gift, "the caravan must be a gift to the ally");
+        let sent_food: f32 = s
+            .caravans
+            .iter()
+            .filter(|c| c.home == 0)
+            .flat_map(|c| c.goods.iter())
+            .filter(|(k, _)| *k == ResourceKind::Food)
+            .map(|(_, q)| *q)
+            .sum();
+        assert!(sent_food > 0.0, "gift should carry food");
+        for _ in 0..40 {
+            if s.caravans.is_empty() {
+                break;
+            }
+            s.caravans_step();
+        }
+        assert!(s.caravans.is_empty(), "gift caravan should be delivered");
+        assert!(s.towns[1].stocks.food >= 5.0 + sent_food - 0.5, "gift food should arrive");
+        assert!(s.towns[0].stocks.gold == 0.0, "a gift must not pay gold to the sender");
+    }
+
+    #[test]
+    fn empire_treaties_calm_borders() {
+        for seed in 1..40u64 {
+            let mut s = Sim::new(seed);
+            ensure_extra_towns(&mut s, 4);
+            let ox = s.towns[0].x;
+            let oy = s.towns[0].y;
+            s.towns[0].x = ox.wrapping_add((seed % 7) as i32 * 9);
+            s.towns[0].y = oy.wrapping_add((seed % 5) as i32 * 4);
+            s.towns[1].x = s.towns[0].x + 20;
+            s.towns[1].y = s.towns[0].y;
+            s.towns[2].x = s.towns[1].x + 20;
+            s.towns[2].y = s.towns[1].y;
+            s.towns[3].x = s.towns[2].x + 20;
+            s.towns[3].y = s.towns[2].y;
+            s.towns[0].empire = Some(0);
+            s.towns[1].empire = Some(0);
+            s.towns[2].empire = Some(1);
+            s.towns[3].empire = Some(1);
+            s.empires.push(Empire { r: 220, g: 40, b: 40, name: "Вест".into(), members: vec![0, 1] });
+            s.empires.push(Empire { r: 40, g: 40, b: 220, name: "Ост".into(), members: vec![2, 3] });
+            s.tick_count = TREATY_EVERY;
+            s.treaty_step();
+            if !s.treaty_between(0, 2) {
+                continue;
+            }
+            assert!(s.treaty_between(0, 2), "treaty should bind the two empires");
+            s.towns[0].stocks = Stock { food: 300.0, water: 300.0, ore: 50.0, meat: 30.0, gold: 0.0 };
+            s.towns[0].cap = 60;
+            craft_families(&mut s);
+            for _ in 0..1500 {
+                s.tick();
+                for i in 0..s.towns.len() {
+                    for j in (i + 1)..s.towns.len() {
+                        if s.treaty_between(i, j)
+                            && ((s.towns[i].at_war && s.towns[i].enemy == Some(j))
+                                || (s.towns[j].at_war && s.towns[j].enemy == Some(i)))
+                        {
+                            panic!("treaty members fought each other");
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        panic!("no seed signed an inter-empire treaty");
     }
 }
