@@ -8,6 +8,52 @@ const PX: usize = 2;
 const PW: usize = W * ART * PX;
 const PH: usize = H * ART * PX;
 
+#[derive(Clone, Copy, PartialEq)]
+pub struct HudConfig {
+    pub show_resources: bool,
+    pub show_buildings: bool,
+    pub show_diplomacy: bool,
+    pub show_animals: bool,
+    pub show_caravans: bool,
+    pub show_weather: bool,
+}
+
+impl Default for HudConfig {
+    fn default() -> Self {
+        Self {
+            show_resources: true,
+            show_buildings: true,
+            show_diplomacy: true,
+            show_animals: true,
+            show_caravans: true,
+            show_weather: true,
+        }
+    }
+}
+
+impl HudConfig {
+    pub fn cycle(&mut self) {
+        if self.show_resources && self.show_buildings && self.show_diplomacy && self.show_animals && self.show_caravans && self.show_weather {
+            self.show_resources = false;
+        } else if !self.show_resources && !self.show_buildings && !self.show_diplomacy && !self.show_animals && !self.show_caravans && !self.show_weather {
+            *self = Self::default();
+        } else {
+            if !self.show_resources { self.show_resources = true; return; }
+            if !self.show_buildings { self.show_buildings = true; return; }
+            if !self.show_diplomacy { self.show_diplomacy = true; return; }
+            if !self.show_animals { self.show_animals = true; return; }
+            if !self.show_caravans { self.show_caravans = true; return; }
+            if !self.show_weather { self.show_weather = true; return; }
+            self.show_resources = false;
+            self.show_buildings = false;
+            self.show_diplomacy = false;
+            self.show_animals = false;
+            self.show_caravans = false;
+            self.show_weather = false;
+        }
+    }
+}
+
 pub struct Fx {
     pub x: f64,
     pub y: f64,
@@ -490,6 +536,7 @@ pub fn draw(
     cam_y: f64,
     build_flash: Option<(usize, f64)>,
     selected_town: Option<usize>,
+    hud: HudConfig,
 ) {
     let cw = W as f64 * CELL;
     let ch = H as f64 * CELL;
@@ -879,13 +926,15 @@ for a in &sim.animals {
     lines.push(format!("👥 {}  {} {:.2}  ⚔{} 💀{}", sim.agents.len(), mood_icon, avg_mood, wars, ruins));
     line_colors.push(None);
 
-    lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, pending));
-    line_colors.push(None);
+    if hud.show_buildings {
+        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, pending));
+        line_colors.push(None);
+    }
 
     lines.push(format!("📚 sci {:.0}  👨‍🎓{}  🔨{}  🤝{}", science, scholars, builders, sim.social_links.len()));
     line_colors.push(None);
 
-    if alliances_n > 0 || treaties_n > 0 || wars > 0 {
+    if hud.show_diplomacy && (alliances_n > 0 || treaties_n > 0 || wars > 0) {
         lines.push(format!("🕊️ ally {}  📜 treaty {}  ⚔ war {}  🎁 gifts {}", alliances_n, treaties_n, wars, sim.gifts_sent));
         line_colors.push(None);
     }
@@ -930,33 +979,48 @@ for a in &sim.animals {
             if agents.is_empty() { 0.0 } else { agents.iter().map(|a| a.mood).sum::<f32>() / agents.len() as f32 }
         };
         let mood_s = mood_bar(town_mood);
-        let f = resource_icon(t.stocks.food, 120.0);
-        let w = resource_icon(t.stocks.water, 120.0);
-        let o = resource_icon(t.stocks.ore, 60.0);
-        let m = resource_icon(t.stocks.meat, 60.0);
-        let g = resource_icon(t.stocks.gold, 30.0);
         let row = lines.len();
-        lines.push(format!(
-            "◆ {} {} pop {}  {}{}{}{}{}  f{:<5.0} w{:<5.0} o{:<4.0} m{:<4.0} g{:<3.0}{}{}",
-            mood_s, ruler, pop, f, w, o, m, g,
-            t.stocks.food, t.stocks.water, t.stocks.ore, t.stocks.meat, t.stocks.gold,
-            if mark.is_empty() { String::new() } else { format!(" {}", mark) }, emp_mark
-        ));
+        if hud.show_resources {
+            let f = resource_icon(t.stocks.food, 120.0);
+            let w = resource_icon(t.stocks.water, 120.0);
+            let o = resource_icon(t.stocks.ore, 60.0);
+            let m = resource_icon(t.stocks.meat, 60.0);
+            let g = resource_icon(t.stocks.gold, 30.0);
+            lines.push(format!(
+                "◆ {} {} pop {}  {}{}{}{}{}  f{:<5.0} w{:<5.0} o{:<4.0} m{:<4.0} g{:<3.0}{}{}",
+                mood_s, ruler, pop, f, w, o, m, g,
+                t.stocks.food, t.stocks.water, t.stocks.ore, t.stocks.meat, t.stocks.gold,
+                if mark.is_empty() { String::new() } else { format!(" {}", mark) }, emp_mark
+            ));
+        } else {
+            lines.push(format!(
+                "◆ {} {} pop {}{}{}",
+                mood_s, ruler, pop,
+                if mark.is_empty() { String::new() } else { format!(" {}", mark) }, emp_mark
+            ));
+        }
         line_colors.push(Some((cr, cg, cb)));
         town_rows.push((row, i));
     }
-    let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
-    let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
-    lines.push(format!("💰 {}g  🐫 caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
-    line_colors.push(None);
-
-    let (mut deer, mut boar, mut wolf, mut cow) = (0, 0, 0, 0);
-    for a in &sim.animals {
-        match a.species {
-            Species::Deer => deer += 1, Species::Boar => boar += 1, Species::Wolf => wolf += 1, Species::Cow => cow += 1,
-        }
+    if hud.show_caravans {
+        let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
+        let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
+        lines.push(format!("💰 {}g  🐫 caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
+        line_colors.push(None);
     }
-    lines.push(format!("🦌{} 🐗{} 🐺{} 🐄{}  {} {:.0}s  x{:.1}  fps{:.0}{}", deer, boar, wolf, cow, weather_name, sim.weather_left * 0.08, speed, fps, if paused { " [PAUSED]" } else { "" }));
+
+    if hud.show_animals {
+        let (mut deer, mut boar, mut wolf, mut cow) = (0, 0, 0, 0);
+        for a in &sim.animals {
+            match a.species {
+                Species::Deer => deer += 1, Species::Boar => boar += 1, Species::Wolf => wolf += 1, Species::Cow => cow += 1,
+            }
+        }
+        lines.push(format!("🦌{} 🐗{} 🐺{} 🐄{}", deer, boar, wolf, cow));
+        line_colors.push(None);
+    }
+
+    lines.push(format!("{} {:.0}s  x{:.1}  fps{:.0}{}", weather_name, sim.weather_left * 0.08, speed, fps, if paused { " [PAUSED]" } else { "" }));
     line_colors.push(None);
 
     let pw = 350.0;

@@ -60,6 +60,7 @@ struct App {
     build_cursor: usize,
     build_flash: Option<(usize, f64)>,
     selected_town: Option<usize>,
+    hud: render::HudConfig,
 }
 
 impl App {
@@ -159,6 +160,7 @@ impl App {
             self.cam_y,
             self.build_flash,
             self.selected_town,
+            self.hud,
         );
     }
 
@@ -579,6 +581,12 @@ impl App {
                     web_sys::console::log_1(&"No saved world found".into());
                 }
             }
+            "F1" => self.hud.show_weather = !self.hud.show_weather,
+            "F2" => self.hud.show_buildings = !self.hud.show_buildings,
+            "F3" => self.hud.show_resources = !self.hud.show_resources,
+            "F4" => self.hud.show_diplomacy = !self.hud.show_diplomacy,
+            "F6" => self.hud.show_animals = !self.hud.show_animals,
+            "F7" => self.hud.show_caravans = !self.hud.show_caravans,
             _ => {}
         }
     }
@@ -665,6 +673,7 @@ pub fn start() -> Result<(), JsValue> {
         build_cursor: 0,
         build_flash: None,
         selected_town: None,
+        hud: render::HudConfig::default(),
     }));
     app.borrow().sync_ui();
 
@@ -831,6 +840,9 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnCow").ok_or("no btnCow")?, &app, |a| {
         a.breed_cows()
+    })?;
+    bind_click(&document.get_element_by_id("btnHud").ok_or("no btnHud")?, &app, |a| {
+        a.hud.cycle();
     })?;
     bind_click(&document.get_element_by_id("btnSave").ok_or("no btnSave")?, &app, |a| {
         a.save_to_local();
