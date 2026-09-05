@@ -485,6 +485,16 @@ fn draw_building(
             ctx.set_fill_style_str("rgb(220,200,255)");
             ctx.fill_rect(px + 2.0, py + 1.0, 2.0, 2.0);
         }
+        crate::sim::BuildingKind::Warehouse => {
+            ctx.set_fill_style_str("rgb(140,130,100)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 4.0);
+            ctx.set_fill_style_str("rgb(120,110,80)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 1.0);
+            ctx.set_fill_style_str("rgb(170,160,130)");
+            ctx.fill_rect(px + 1.0, py + 2.0, 4.0, 3.0);
+            ctx.set_fill_style_str("rgb(200,190,150)");
+            ctx.fill_rect(px + 2.0, py + 3.0, 2.0, 1.0);
+        }
     }
 }
 
@@ -1223,6 +1233,7 @@ for a in &sim.animals {
             let smith = build_counts(crate::sim::BuildingKind::Smithy);
             let lib = build_counts(crate::sim::BuildingKind::Library);
             let temple = build_counts(crate::sim::BuildingKind::Temple);
+            let warehouse = build_counts(crate::sim::BuildingKind::Warehouse);
             let bless_name = match t.blessing {
                 crate::sim::Blessing::Fertility => "плодородие",
                 crate::sim::Blessing::Abundance => "изобилие",
@@ -1252,6 +1263,7 @@ for a in &sim.animals {
                     crate::sim::BuildingKind::University => "🎓", crate::sim::BuildingKind::Smithy => "🔨",
                     crate::sim::BuildingKind::Library => "📚",
                     crate::sim::BuildingKind::Temple => "🛕",
+                    crate::sim::BuildingKind::Warehouse => "📦",
                 }).collect::<Vec<_>>().join("")
             };
             let families: Vec<_> = sim.families.iter()
@@ -1282,16 +1294,22 @@ for a in &sim.animals {
                 }
                 bar
             };
-            p.push(format!(" 🌾 food  {:>5.0} [{}]", t.stocks.food, res_bar(t.stocks.food, 120.0)));
-            p.push(format!(" 💧 water {:>5.0} [{}]", t.stocks.water, res_bar(t.stocks.water, 120.0)));
-            p.push(format!(" ⛏ ore   {:>5.0} [{}]", t.stocks.ore, res_bar(t.stocks.ore, 60.0)));
-            p.push(format!(" 🥩 meat  {:>5.0} [{}]", t.stocks.meat, res_bar(t.stocks.meat, 60.0)));
-            p.push(format!(" 💰 gold  {:>5.0} [{}]", t.stocks.gold, res_bar(t.stocks.gold, 30.0)));
-            p.push(format!(" 🐟 fish  {:>5.0} [{}]", t.stocks.fish, res_bar(t.stocks.fish, 40.0)));
+            let fc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Food);
+            let wc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Water);
+            let oc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Ore);
+            let mc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Meat);
+            let gc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Gold);
+            let fic = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Fish);
+            p.push(format!(" 🌾 food  {:>5.0}/{:.0} [{}]", t.stocks.food, fc, res_bar(t.stocks.food, fc)));
+            p.push(format!(" 💧 water {:>5.0}/{:.0} [{}]", t.stocks.water, wc, res_bar(t.stocks.water, wc)));
+            p.push(format!(" ⛏ ore   {:>5.0}/{:.0} [{}]", t.stocks.ore, oc, res_bar(t.stocks.ore, oc)));
+            p.push(format!(" 🥩 meat  {:>5.0}/{:.0} [{}]", t.stocks.meat, mc, res_bar(t.stocks.meat, mc)));
+            p.push(format!(" 💰 gold  {:>5.0}/{:.0} [{}]", t.stocks.gold, gc, res_bar(t.stocks.gold, gc)));
+            p.push(format!(" 🐟 fish  {:>5.0}/{:.0} [{}]", t.stocks.fish, fic, res_bar(t.stocks.fish, fic)));
             p.push(String::new());
 
             p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
-            p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{}", barracks, uni, smith, lib, temple));
+            p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{} 📦{}", barracks, uni, smith, lib, temple, warehouse));
             if !t.queue.is_empty() {
                 p.push(format!(" ⏳ {} ({:.0}%)", queue_str, t.queue[0].1 * 100.0));
             }

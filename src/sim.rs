@@ -81,7 +81,19 @@ const BOAR_TUSK_CHANCE: f32 = 0.05;
 const WOLF_TARGET_RADIUS: i32 = 12;
 const ANIMAL_MELEE_REACH: i32 = 2;
 
-const GOLD_MAX: f32 = 200.0;
+const WAREHOUSE_COST: f32 = 60.0;
+const WAREHOUSE_FOOD_CAP: f32 = 40.0;
+const WAREHOUSE_WATER_CAP: f32 = 40.0;
+const WAREHOUSE_ORE_CAP: f32 = 25.0;
+const WAREHOUSE_MEAT_CAP: f32 = 20.0;
+const WAREHOUSE_FISH_CAP: f32 = 20.0;
+const WAREHOUSE_GOLD_CAP: f32 = 100.0;
+const BASE_FOOD_CAP: f32 = 200.0;
+const BASE_WATER_CAP: f32 = 200.0;
+const BASE_ORE_CAP: f32 = 120.0;
+const BASE_MEAT_CAP: f32 = 80.0;
+const BASE_FISH_CAP: f32 = 60.0;
+const BASE_GOLD_CAP: f32 = 200.0;
 const TRADE_POST_COST: f32 = 40.0;
 const TRADE_TRICKLE: f32 = 0.03;
 const CARAVAN_EVERY: u64 = 900;
@@ -382,6 +394,7 @@ pub enum BuildingKind {
     Smithy,
     Library,
     Temple,
+    Warehouse,
 }
 
 impl BuildingKind {
@@ -399,8 +412,29 @@ impl BuildingKind {
             BuildingKind::Smithy => SMITHY_COST,
             BuildingKind::Library => LIBRARY_COST,
             BuildingKind::Temple => TEMPLE_COST,
+            BuildingKind::Warehouse => WAREHOUSE_COST,
         }
     }
+}
+
+fn warehouse_count(built: &[BuildingKind]) -> i32 {
+    built.iter().filter(|b| **b == BuildingKind::Warehouse).count() as i32
+}
+
+pub fn stock_cap(built: &[BuildingKind], k: ResourceKind) -> f32 {
+    let w = warehouse_count(built);
+    match k {
+        ResourceKind::Food  => BASE_FOOD_CAP  + w as f32 * WAREHOUSE_FOOD_CAP,
+        ResourceKind::Water => BASE_WATER_CAP + w as f32 * WAREHOUSE_WATER_CAP,
+        ResourceKind::Ore   => BASE_ORE_CAP   + w as f32 * WAREHOUSE_ORE_CAP,
+        ResourceKind::Meat  => BASE_MEAT_CAP  + w as f32 * WAREHOUSE_MEAT_CAP,
+        ResourceKind::Gold  => BASE_GOLD_CAP  + w as f32 * WAREHOUSE_GOLD_CAP,
+        ResourceKind::Fish  => BASE_FISH_CAP  + w as f32 * WAREHOUSE_FISH_CAP,
+    }
+}
+
+fn clamp_stock(current: f32, added: f32, cap: f32) -> f32 {
+    (current + added).min(cap.max(current))
 }
 
 pub fn trade_price(k: ResourceKind) -> f32 {
@@ -1181,30 +1215,38 @@ impl Sim {
             if !self.has_trade_post(ti) {
                 continue;
             }
+            let built = self.towns[ti].built.clone();
             let (mut f, mut w, mut o, mut m, mut g, mut fi) = {
                 let s = &self.towns[ti].stocks;
                 (s.food, s.water, s.ore, s.meat, s.gold, s.fish)
             };
+            let fc = stock_cap(&built, ResourceKind::Food);
+            let wc = stock_cap(&built, ResourceKind::Water);
+            let oc = stock_cap(&built, ResourceKind::Ore);
+            let mc = stock_cap(&built, ResourceKind::Meat);
+            let gc = stock_cap(&built, ResourceKind::Gold);
+            let fic = stock_cap(&built, ResourceKind::Fish);
             if f < BUY_FOOD_AT && g >= trade_price(ResourceKind::Food) * 2.0 {
-                f += 2.0;
+                f = clamp_stock(f, 2.0, fc);
                 g -= trade_price(ResourceKind::Food) * 2.0;
             }
             if w < BUY_WATER_AT && g >= trade_price(ResourceKind::Water) * 2.0 {
-                w += 2.0;
+                w = clamp_stock(w, 2.0, wc);
                 g -= trade_price(ResourceKind::Water) * 2.0;
             }
             if o < BUY_ORE_AT && g >= trade_price(ResourceKind::Ore) {
-                o += 1.0;
+                o = clamp_stock(o, 1.0, oc);
                 g -= trade_price(ResourceKind::Ore);
             }
             if m < BUY_MEAT_AT && g >= trade_price(ResourceKind::Meat) {
-                m += 1.0;
+                m = clamp_stock(m, 1.0, mc);
                 g -= trade_price(ResourceKind::Meat);
             }
             if fi < BUY_FISH_AT && g >= trade_price(ResourceKind::Fish) {
-                fi += 1.0;
+                fi = clamp_stock(fi, 1.0, fic);
                 g -= trade_price(ResourceKind::Fish);
             }
+            g = g.max(0.0).min(gc);
             let s = &mut self.towns[ti].stocks;
             s.food = f;
             s.water = w;
@@ -1329,19 +1371,22 @@ impl Sim {
             if self.cheb(x, y, tx, ty) <= 1 {
                 let goods = std::mem::take(&mut self.caravans[i].goods);
                 if !gift {
-                    let gold: f32 = goods.iter().map(|(k, q)| q * trade_price(*k)).sum();
+                    let gold_cap = stock_cap(&self.towns[home].built, ResourceKind::Gold);
+                let gold: f32 = goods.iter().map(|(k, q)| q * trade_price(*k)).sum();
                     let s = &mut self.towns[home].stocks;
-                    s.gold = (s.gold + gold).min(GOLD_MAX);
+                    s.gold = clamp_stock(s.gold, gold, gold_cap);
                 }
+                let target_built = self.towns[target].built.clone();
                 let st = &mut self.towns[target].stocks;
                 for (k, q) in &goods {
+                    let cap = stock_cap(&target_built, *k);
                     match k {
-                        ResourceKind::Food => st.food += q,
-                        ResourceKind::Water => st.water += q,
-                        ResourceKind::Ore => st.ore += q,
-                        ResourceKind::Meat => st.meat += q,
+                        ResourceKind::Food => st.food = clamp_stock(st.food, *q, cap),
+                        ResourceKind::Water => st.water = clamp_stock(st.water, *q, cap),
+                        ResourceKind::Ore => st.ore = clamp_stock(st.ore, *q, cap),
+                        ResourceKind::Meat => st.meat = clamp_stock(st.meat, *q, cap),
                         ResourceKind::Gold => {}
-                        ResourceKind::Fish => st.fish += q,
+                        ResourceKind::Fish => st.fish = clamp_stock(st.fish, *q, cap),
                     }
                 }
             } else {
@@ -1689,6 +1734,10 @@ impl Sim {
                         && !has(BuildingKind::Temple) && !need(BuildingKind::Temple)
                     {
                         t.queue.push((BuildingKind::Temple, 0.0));
+                    } else if t.stocks.food > stock_cap(&t.built, ResourceKind::Food) * 0.75
+                        && !has(BuildingKind::Warehouse) && !need(BuildingKind::Warehouse)
+                    {
+                        t.queue.push((BuildingKind::Warehouse, 0.0));
                     } else if pop_ti >= t.cap && has(BuildingKind::House) && !need(BuildingKind::House) {
                         t.queue.push((BuildingKind::House, 0.0));
                     }
@@ -1886,6 +1935,14 @@ impl Sim {
                 c.food = 0.0;
                 c.ore = 0.0;
                 c.water = WATER_MAX;
+                for a in self.agents.iter_mut() {
+                    if a.x == x && a.y == y {
+                        if let Some(t) = self.towns.get(a.home) {
+                            a.x = t.x;
+                            a.y = t.y;
+                        }
+                    }
+                }
             }
         }
 
@@ -1897,11 +1954,13 @@ impl Sim {
             }
             let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
             if wells > 0 && pops[ti] > 0 {
-                t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32 * wmult).min(200.0);
+                let water_cap = stock_cap(&t.built, ResourceKind::Water);
+                t.stocks.water = clamp_stock(t.stocks.water, WELL_WATER_PER_TICK * wells as f32 * wmult, water_cap);
             }
             let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
             if posts > 0 {
-                t.stocks.gold = (t.stocks.gold + TRADE_TRICKLE * posts as f32).min(GOLD_MAX);
+                let gold_cap = stock_cap(&t.built, ResourceKind::Gold);
+                t.stocks.gold = clamp_stock(t.stocks.gold, TRADE_TRICKLE * posts as f32, gold_cap);
             }
             if self.weather == Weather::Heat {
                 t.stocks.water = (t.stocks.water - 0.08).max(0.0);
@@ -1962,7 +2021,8 @@ impl Sim {
                 t.prophecy_left = PROPHECY_LEN;
             }
             if t.prophecy == Prophecy::Prosperity && self.tick_count % 100 == 0 {
-                t.stocks.gold = (t.stocks.gold + 2.0).min(500.0);
+                let gold_cap = stock_cap(&t.built, ResourceKind::Gold);
+                t.stocks.gold = clamp_stock(t.stocks.gold, 2.0, gold_cap);
             }
         }
 
@@ -2889,14 +2949,15 @@ impl Sim {
                 let ti = self.agents[i].home;
                 let a = &mut self.agents[i];
                 if let Some((kind, qty)) = a.carry.take() {
-                    let st = &mut self.towns[ti].stocks;
+                    let t = &mut self.towns[ti];
+                    let cap = stock_cap(&t.built, kind);
                     match kind {
-                        ResourceKind::Food => st.food += qty,
-                        ResourceKind::Water => st.water += qty,
-                        ResourceKind::Ore => st.ore += qty,
-                        ResourceKind::Meat => st.meat += qty,
+                        ResourceKind::Food => t.stocks.food = clamp_stock(t.stocks.food, qty, cap),
+                        ResourceKind::Water => t.stocks.water = clamp_stock(t.stocks.water, qty, cap),
+                        ResourceKind::Ore => t.stocks.ore = clamp_stock(t.stocks.ore, qty, cap),
+                        ResourceKind::Meat => t.stocks.meat = clamp_stock(t.stocks.meat, qty, cap),
                         ResourceKind::Gold => {}
-                        ResourceKind::Fish => st.fish += qty,
+                        ResourceKind::Fish => t.stocks.fish = clamp_stock(t.stocks.fish, qty, cap),
                     }
                 }
                 a.hunger = (a.hunger - 5.0).max(0.0);
@@ -3641,7 +3702,8 @@ impl Sim {
             if give > 0.0 {
                 for t in &mut self.towns {
                     if t.alive && (t.x - vx).abs().max(t.y - vy) <= GOLD_VEIN_RANGE {
-                        t.stocks.gold = (t.stocks.gold + give).min(GOLD_MAX);
+                        let gold_cap = stock_cap(&t.built, ResourceKind::Gold);
+                        t.stocks.gold = clamp_stock(t.stocks.gold, give, gold_cap);
                     }
                 }
                 amt -= give;
@@ -6181,7 +6243,7 @@ fn marriages_form_and_cheapen_births() {
             "a vein in range should feed gold to the town"
         );
         assert!(
-            s.towns[0].stocks.gold <= GOLD_MAX + 0.001,
+            s.towns[0].stocks.gold <= stock_cap(&s.towns[0].built, ResourceKind::Gold) + 0.001,
             "gold must respect the town cap"
         );
         let still = s.gold_veins.iter().any(|&(x, y, _)| x == vx && y == vy);
