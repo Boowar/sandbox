@@ -1,14 +1,15 @@
 mod render;
 mod sim;
 
-use js_sys::{Date, Function};
+use js_sys::{Date, Function, Uint8Array};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
-    CanvasRenderingContext2d, Element, EventTarget, HtmlCanvasElement, KeyboardEvent, PointerEvent,
-    WheelEvent,
+    Blob, BlobPropertyBag, CanvasRenderingContext2d, Element, EventTarget,
+    HtmlAnchorElement, HtmlCanvasElement, HtmlInputElement, KeyboardEvent,
+    PointerEvent, Url, WheelEvent,
 };
 
 const CELL: f64 = 8.0;
@@ -182,6 +183,105 @@ impl App {
         self.acc = 0.0;
     }
 
+    fn save_to_local(&self) {
+        let json = self.sim.borrow().save_json();
+        let window = web_sys::window().expect("no window");
+        let ls = window.local_storage().expect("no localStorage").expect("no localStorage");
+        let _ = ls.set_item("sandbox_save", &json);
+    }
+
+    fn load_from_local(&mut self) -> bool {
+        let window = web_sys::window().expect("no window");
+        let ls = match window.local_storage() {
+            Ok(Some(ls)) => ls,
+            _ => return false,
+        };
+        let json = match ls.get_item("sandbox_save") {
+            Ok(Some(j)) => j,
+            _ => return false,
+        };
+        if let Some(s) = sim::Sim::load_json(&json) {
+            render::draw_terrain(&self.terrain_ctx, &s);
+            self.sim = Rc::new(RefCell::new(s));
+            self.effects.clear();
+            self.acc = 0.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn download_save(&self) {
+        let json = self.sim.borrow().save_json();
+        let window = web_sys::window().expect("no window");
+        let arr = Uint8Array::new_with_byte_offset_and_length(
+            &JsValue::from_str(&json),
+            0,
+            json.len() as u32,
+        );
+        let bag = BlobPropertyBag::new();
+        bag.set_type("application/json");
+        let blob = Blob::new_with_str_sequence_and_options(
+            &arr,
+            &bag,
+        )
+        .expect("blob");
+        let url = Url::create_object_url_with_blob(&blob).expect("url");
+        let a: HtmlAnchorElement = window
+            .document()
+            .expect("doc")
+            .create_element("a")
+            .expect("a")
+            .dyn_into()
+            .expect("dyn");
+        a.set_href(&url);
+        a.set_download("sandbox_save.json");
+        a.click();
+        let _ = Url::revoke_object_url(&url);
+    }
+
+    fn upload_save(&mut self) {
+        let window = web_sys::window().expect("no window");
+        let document = window.document().expect("doc");
+        let input: HtmlInputElement = document
+            .create_element("input")
+            .expect("input")
+            .dyn_into()
+            .expect("dyn");
+        input.set_type("file");
+        input.set_accept(".json");
+        let sim_clone = Rc::clone(&self.sim);
+        let terrain_clone = self.terrain_ctx.clone();
+        let input_clone = input.clone();
+        let cb = Closure::wrap(Box::new(move || {
+            let files = match input_clone.files() {
+                Some(f) => f,
+                None => return,
+            };
+            let file = match files.get(0) {
+                Some(f) => f,
+                None => return,
+            };
+            let reader = web_sys::FileReader::new().expect("reader");
+            let reader2 = reader.clone();
+            let sim_inner = Rc::clone(&sim_clone);
+            let terrain_inner = terrain_clone.clone();
+            let onload = Closure::wrap(Box::new(move || {
+                let text = reader2.result().expect("result").as_string().expect("str");
+                if let Some(s) = sim::Sim::load_json(&text) {
+                    render::draw_terrain(&terrain_inner, &s);
+                    *sim_inner.borrow_mut() = s;
+                }
+            }) as Box<dyn FnMut()>);
+            reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+            let _ = reader.read_as_text(&file.into());
+            std::mem::forget(onload);
+        }) as Box<dyn FnMut()>);
+        let _ = input.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref());
+        std::mem::forget(cb);
+        input.click();
+    }
+
     fn canvas_px(&self, client_x: f64, client_y: f64) -> Option<(f64, f64)> {
         let canvas = self.ctx.canvas()?;
         let r = canvas.get_bounding_client_rect();
@@ -335,6 +435,12 @@ impl App {
             "q" | "Q" | "й" | "Й" => self.build(sim::BuildingKind::Library),
             "c" | "C" | "с" | "С" => self.breed_cows(),
             "r" | "R" | "к" | "К" => self.new_world(),
+            "F5" => self.save_to_local(),
+            "F9" => {
+                if !self.load_from_local() {
+                    web_sys::console::log_1(&"No saved world found".into());
+                }
+            }
             _ => {}
         }
     }
@@ -565,6 +671,13 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnCow").ok_or("no btnCow")?, &app, |a| {
         a.breed_cows()
+    })?;
+    bind_click(&document.get_element_by_id("btnSave").ok_or("no btnSave")?, &app, |a| {
+        a.save_to_local();
+        a.download_save();
+    })?;
+    bind_click(&document.get_element_by_id("btnLoad").ok_or("no btnLoad")?, &app, |a| {
+        a.upload_save();
     })?;
 
     let app_loop = Rc::clone(&app);

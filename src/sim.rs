@@ -151,7 +151,7 @@ const FOUND_COLONY_POP: usize = 4;
 const MAX_TOWNS: usize = 10;
 const TOWN_WASTE_NEED: u64 = 3;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Weather {
     Clear,
     Rain,
@@ -159,7 +159,7 @@ pub enum Weather {
     Frost,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Season {
     Spring,
     Summer,
@@ -167,7 +167,7 @@ pub enum Season {
     Winter,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum TownIdea {
     None,
     War,
@@ -175,7 +175,7 @@ pub enum TownIdea {
     Toil,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Role {
     Worker,
     Farmer,
@@ -188,7 +188,7 @@ pub enum Role {
     Builder,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Blessing {
     None,
     Fertility,
@@ -199,7 +199,7 @@ const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
 const WELL_WATER_PER_TICK: f32 = 0.3;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Terrain {
     Grass,
     Forest,
@@ -218,7 +218,7 @@ fn is_food_source(c: &Cell) -> bool {
     c.terrain == Terrain::Forest || c.terrain == Terrain::Farm
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ResourceKind {
     Food,
     Water,
@@ -227,7 +227,7 @@ pub enum ResourceKind {
     Gold,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Species {
     Deer,
     Boar,
@@ -255,7 +255,7 @@ impl Species {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum BuildingKind {
     House,
     Well,
@@ -298,7 +298,7 @@ pub fn trade_price(k: ResourceKind) -> f32 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Stock {
     pub food: f32,
     pub water: f32,
@@ -307,7 +307,7 @@ pub struct Stock {
     pub gold: f32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Cell {
     pub terrain: Terrain,
     pub food: f32,
@@ -317,6 +317,7 @@ pub struct Cell {
     pub gold: f32,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Agent {
     pub home: usize,
     pub x: i32,
@@ -337,6 +338,7 @@ pub struct Agent {
     pub age: u32,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Settlement {
     pub x: i32,
     pub y: i32,
@@ -362,6 +364,7 @@ pub struct Settlement {
     pub dev: f32,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Empire {
     pub r: u8,
     pub g: u8,
@@ -370,6 +373,7 @@ pub struct Empire {
     pub members: Vec<usize>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Family {
     pub id: usize,
     pub town: usize,
@@ -391,6 +395,7 @@ enum Action {
     Die,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Animal {
     pub x: i32,
     pub y: i32,
@@ -399,6 +404,7 @@ pub struct Animal {
     pub home: Option<usize>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Caravan {
     pub home: usize,
     pub target: usize,
@@ -408,6 +414,7 @@ pub struct Caravan {
     pub gift: bool,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Sim {
     pub grid: Vec<Cell>,
     pub agents: Vec<Agent>,
@@ -427,7 +434,7 @@ pub struct Sim {
     pub weather_left: f64,
     pub season: Season,
     pub day_phase: u64,
-    rng: u64,
+    pub rng: u64,
 }
 
 fn idx(x: i32, y: i32) -> usize {
@@ -1619,6 +1626,14 @@ impl Sim {
 
     pub fn is_day(&self) -> bool {
         !self.is_night()
+    }
+
+    pub fn save_json(&self) -> String {
+        serde_json::to_string(self).expect("serialize sim")
+    }
+
+    pub fn load_json(json: &str) -> Option<Self> {
+        serde_json::from_str(json).ok()
     }
 
     fn animals_step(&mut self) {
@@ -5538,5 +5553,28 @@ fn marriages_form_and_cheapen_births() {
             night_gain,
             day_gain
         );
+    }
+
+    #[test]
+    fn save_load_round_trip() {
+        let mut s = Sim::new(42);
+        for _ in 0..500 {
+            s.tick();
+        }
+        let json = s.save_json();
+        let s2 = Sim::load_json(&json).expect("load should succeed");
+        assert_eq!(s2.tick_count, s.tick_count);
+        assert_eq!(s2.grid.len(), s.grid.len());
+        assert_eq!(s2.agents.len(), s.agents.len());
+        assert_eq!(s2.towns.len(), s.towns.len());
+        assert_eq!(s2.families.len(), s.families.len());
+        assert_eq!(s2.empires.len(), s.empires.len());
+        assert_eq!(s2.animals.len(), s.animals.len());
+        assert_eq!(s2.rng, s.rng);
+        assert_eq!(s2.weather, s.weather);
+        assert_eq!(s2.season, s.season);
+        assert_eq!(s2.day_phase, s.day_phase);
+        assert_eq!(s2.alliances, s.alliances);
+        assert_eq!(s2.treaties, s.treaties);
     }
 }
