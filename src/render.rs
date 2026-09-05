@@ -846,6 +846,8 @@ for a in &sim.animals {
     let sick = sim.agents.iter().filter(|a| a.sick > 0).count();
     let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let wars = sim.towns.iter().filter(|t| t.at_war).count();
+    let alliances_n = sim.alliances.iter().filter(|(_, _, until)| *until > sim.tick_count).count();
+    let treaties_n = sim.treaties.iter().filter(|(_, _, until)| *until > sim.tick_count).count();
     let ruins = sim.towns.iter().filter(|t| !t.alive).count();
     let weather_name = match sim.weather {
         Weather::Clear => "☀", Weather::Rain => "🌧", Weather::Heat => "🔥", Weather::Frost => "❄",
@@ -882,6 +884,11 @@ for a in &sim.animals {
 
     lines.push(format!("📚 sci {:.0}  👨‍🎓{}  🔨{}  🤝{}", science, scholars, builders, sim.social_links.len()));
     line_colors.push(None);
+
+    if alliances_n > 0 || treaties_n > 0 || wars > 0 {
+        lines.push(format!("🕊️ ally {}  📜 treaty {}  ⚔ war {}  🎁 gifts {}", alliances_n, treaties_n, wars, sim.gifts_sent));
+        line_colors.push(None);
+    }
 
     let max_faith = sim.towns.iter().map(|t| t.faith as usize).max().unwrap_or(0);
     if sick > 0 || max_faith > 0 {
@@ -1112,6 +1119,36 @@ for a in &sim.animals {
             }
             if !emp_name.is_empty() {
                 p.push(format!("⚑ {}", emp_name));
+            }
+            let my_allies: Vec<String> = sim.alliances.iter()
+                .filter(|&(a, b, until)| *until > sim.tick_count && (*a == si || *b == si))
+                .map(|&(a, b, _)| {
+                    let other = if a == si { b } else { a };
+                    let name = sim.families.iter().filter(|f| f.town == other && !f.extinct)
+                        .max_by_key(|f| f.members).map(|f| f.name.as_str()).unwrap_or("?");
+                    let remaining = {
+                        let entry = sim.alliances.iter().find(|&(aa, bb, _)| *aa == a && *bb == b).unwrap();
+                        (entry.2 - sim.tick_count) as u32
+                    };
+                    format!("{}({}t)", name, remaining)
+                }).collect();
+            if !my_allies.is_empty() {
+                p.push(format!("🕊️ allies: {}", my_allies.join(", ")));
+            }
+            let my_empire = t.empire;
+            let my_treaties: Vec<String> = sim.treaties.iter()
+                .filter(|&(a, b, until)| *until > sim.tick_count && (my_empire == Some(*a) || my_empire == Some(*b)))
+                .map(|&(a, b, _)| {
+                    let other_e = if my_empire == Some(a) { b } else { a };
+                    let name = sim.empires.get(other_e).map(|e| e.name.as_str()).unwrap_or("?");
+                    let remaining = {
+                        let entry = sim.treaties.iter().find(|&(aa, bb, _)| *aa == a && *bb == b).unwrap();
+                        (entry.2 - sim.tick_count) as u32
+                    };
+                    format!("{}({}t)", name, remaining)
+                }).collect();
+            if !my_treaties.is_empty() {
+                p.push(format!("📜 treaties: {}", my_treaties.join(", ")));
             }
             if !idea_name.is_empty() {
                 p.push(format!("💡 {} ({}.0 тик.)", idea_name, t.idea_left as u32));

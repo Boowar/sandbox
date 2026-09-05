@@ -2780,7 +2780,7 @@ impl Sim {
         d <= WAR_START_TOWN_RANGE
     }
 
-    fn empire_of(&self, ti: usize) -> Option<usize> {
+    pub fn empire_of(&self, ti: usize) -> Option<usize> {
         self.towns[ti].empire
     }
 
