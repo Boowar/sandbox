@@ -761,6 +761,19 @@ for a in &sim.animals {
         ctx.set_fill_style_str("rgba(8,12,26,0.34)");
         ctx.fill_rect(0.0, 0.0, cw, ch);
     }
+    ctx.set_fill_style_str("rgba(140,120,90,0.35)");
+    for y in 0..H {
+        for x in 0..W {
+            if sim.roads[y * W + x] {
+                ctx.fill_rect(
+                    x as f64 * CELL + 1.0,
+                    y as f64 * CELL + 1.0,
+                    CELL - 2.0,
+                    CELL - 2.0,
+                );
+            }
+        }
+    }
     let dawn_len = DAY_LEN as f64 * 0.1;
     let phase = sim.day_phase as f64;
     let dusk = if phase < dawn_len {

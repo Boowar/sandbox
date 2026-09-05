@@ -426,6 +426,7 @@ pub struct Sim {
     pub empires: Vec<Empire>,
     pub animals: Vec<Animal>,
     pub caravans: Vec<Caravan>,
+    pub roads: Vec<bool>,
     pub migrations: u32,
     pub alliances: Vec<(usize, usize, u64)>,
     pub treaties: Vec<(usize, usize, u64)>,
@@ -471,6 +472,7 @@ impl Sim {
             empires: Vec::new(),
             animals: Vec::new(),
             caravans: Vec::new(),
+            roads: vec![false; W * H],
             migrations: 0,
             alliances: Vec::new(),
             treaties: Vec::new(),
@@ -487,6 +489,7 @@ impl Sim {
         sim.ensure_hills();
         sim.spawn_world();
         sim.spawn_animals();
+        sim.build_roads();
         sim
     }
 
@@ -910,6 +913,40 @@ impl Sim {
         an.species == Species::Cow && an.home.is_some()
     }
 
+    fn build_roads(&mut self) {
+        let towns: Vec<(i32, i32)> = self.towns.iter().map(|t| (t.x, t.y)).collect();
+        for i in 0..towns.len() {
+            for j in (i + 1)..towns.len() {
+                let (x0, y0) = towns[i];
+                let (x1, y1) = towns[j];
+                let dx = (x1 - x0).abs();
+                let dy = (y1 - y0).abs();
+                let sx = if x0 < x1 { 1 } else { -1 };
+                let sy = if y0 < y1 { 1 } else { -1 };
+                let mut err = dx - dy;
+                let mut cx = x0;
+                let mut cy = y0;
+                loop {
+                    if in_bounds(cx, cy) {
+                        self.roads[idx(cx, cy)] = true;
+                    }
+                    if cx == x1 && cy == y1 {
+                        break;
+                    }
+                    let e2 = 2 * err;
+                    if e2 > -dy {
+                        err -= dy;
+                        cx += sx;
+                    }
+                    if e2 < dx {
+                        err += dx;
+                        cy += sy;
+                    }
+                }
+            }
+        }
+    }
+
     fn domestic_herd(&self, ti: usize) -> usize {
         self.animals
             .iter()
@@ -1120,6 +1157,11 @@ impl Sim {
                 let (nx, ny) = self.caravan_step(x, y, tx, ty);
                 self.caravans[i].x = nx;
                 self.caravans[i].y = ny;
+                if self.roads[idx(nx, ny)] {
+                    let (nx2, ny2) = self.caravan_step(nx, ny, tx, ty);
+                    self.caravans[i].x = nx2;
+                    self.caravans[i].y = ny2;
+                }
             }
         }
         self.caravans.retain(|c| !c.goods.is_empty());
@@ -2377,13 +2419,14 @@ impl Sim {
                     return;
                 }
                 let wadj = self.is_water_adj(nx, ny);
+                let on_road = self.roads[idx(nx, ny)];
                 {
                     let a = &mut self.agents[i];
                     a.x = nx;
                     a.y = ny;
                     a.dir_x = (nx - ox).clamp(-1, 1);
                     a.dir_y = (ny - oy).clamp(-1, 1);
-                    a.energy -= 0.6;
+                    a.energy -= if on_road { 0.3 } else { 0.6 };
                     if a.carry.is_none() {
                         match a.want {
                             ResourceKind::Food => {
@@ -2838,6 +2881,38 @@ impl Sim {
                 ^ (a.y as u32).wrapping_mul(0x119d_e1f3)
                 ^ 0x9e37_79b9u32.wrapping_mul(0xabcd_ef01);
             a.age = 2000 + (hh % 12000);
+        }
+        let parent = _mi;
+        if parent < self.towns.len() {
+            let (px, py) = (self.towns[parent].x, self.towns[parent].y);
+            self.build_road_between(px, py, x, y);
+        }
+    }
+
+    fn build_road_between(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
+        let dx = (x1 - x0).abs();
+        let dy = (y1 - y0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx - dy;
+        let mut cx = x0;
+        let mut cy = y0;
+        loop {
+            if in_bounds(cx, cy) {
+                self.roads[idx(cx, cy)] = true;
+            }
+            if cx == x1 && cy == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 > -dy {
+                err -= dy;
+                cx += sx;
+            }
+            if e2 < dx {
+                err += dx;
+                cy += sy;
+            }
         }
     }
 
