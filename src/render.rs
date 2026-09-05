@@ -443,8 +443,20 @@ pub fn draw(
         }
     }
 
+    let town_col: Vec<(u8, u8, u8)> = sim
+        .towns
+        .iter()
+        .map(|t| {
+            t.empire
+                .and_then(|e| sim.empires.get(e))
+                .map(|emp| (emp.r, emp.g, emp.b))
+                .unwrap_or((t.r, t.g, t.b))
+        })
+        .collect();
+
     for (i, t) in sim.towns.iter().enumerate() {
-        draw_house(ctx, t.x as f64 * CELL - 3.0, t.y as f64 * CELL - 2.0, t.r, t.g, t.b);
+        let (tr, tg, tb) = town_col[i];
+        draw_house(ctx, t.x as f64 * CELL - 3.0, t.y as f64 * CELL - 2.0, tr, tg, tb);
         if t.at_war {
             ctx.set_fill_style_str("rgb(232,68,64)");
             ctx.fill_rect(t.x as f64 * CELL - 5.0, t.y as f64 * CELL - 7.0, 10.0, 7.0);
@@ -484,7 +496,7 @@ pub fn draw(
         for (i, k) in t.built.iter().enumerate() {
             let sx = bx + (i % 6) as f64 * 8.0;
             let sy = by + (i / 6) as f64 * 8.0;
-            draw_building(ctx, sx, sy, *k, t.r, t.g, t.b);
+            draw_building(ctx, sx, sy, *k, tr, tg, tb);
         }
         if let Some((fl, ft)) = build_flash {
             if fl == i && ft > 0.0 {
@@ -496,7 +508,7 @@ pub fn draw(
             let slot = t.built.len();
             let sx = bx + (slot % 6) as f64 * 8.0;
             let sy = by + (slot / 6) as f64 * 8.0;
-            draw_scaffold(ctx, sx, sy, *progress, kind.cost(), t.r, t.g, t.b);
+            draw_scaffold(ctx, sx, sy, *progress, kind.cost(), tr, tg, tb);
         }
         let _ = i;
         ctx.set_font("11px ui-monospace, monospace");
@@ -516,8 +528,23 @@ pub fn draw(
         }
     }
 
+    for emp in sim.empires.iter().filter(|e| e.members.len() > 1) {
+        ctx.set_stroke_style_str(&format!("rgba({},{},{},0.55)", emp.r, emp.g, emp.b));
+        ctx.set_line_width(2.0);
+        ctx.begin_path();
+        for w in emp.members.windows(2) {
+            let t0 = &sim.towns[w[0]];
+            let t1 = &sim.towns[w[1]];
+            ctx.move_to(t0.x as f64 * CELL, t0.y as f64 * CELL);
+            ctx.line_to(t1.x as f64 * CELL, t1.y as f64 * CELL);
+        }
+        ctx.stroke();
+        ctx.set_line_width(1.0);
+    }
+
     for (i, a) in sim.agents.iter().enumerate() {
         let t = &sim.towns[a.home];
+        let (tr, tg, tb) = if a.home < town_col.len() { town_col[a.home] } else { (t.r, t.g, t.b) };
         let fx = a.x as f64 * CELL + 2.0;
         let fy = a.y as f64 * CELL + 1.0;
         if let Some(fam) = sim.families.get(a.family) {
@@ -526,7 +553,7 @@ pub fn draw(
             ctx.set_fill_style_str(&format!("rgba({},{},{},{:.2})", fr, fg, fb, alpha));
             ctx.fill_rect(fx - 1.0, fy - 1.0, 4.0, 4.0);
         }
-        draw_agent(ctx, fx, fy, t.r, t.g, t.b, a.dir_x.clamp(-1, 1), i & 1);
+        draw_agent(ctx, fx, fy, tr, tg, tb, a.dir_x.clamp(-1, 1), i & 1);
         if a.founder {
             ctx.set_fill_style_str("rgb(255,222,120)");
             ctx.fill_rect(fx, fy - 1.0, 2.0, 1.0);
@@ -730,11 +757,26 @@ for a in &sim.animals {
                 TownIdea::Toil => "  🔨",
             }
         };
+        let emp_mark = t
+            .empire
+            .and_then(|e| sim.empires.get(e))
+            .map(|emp| format!("  ⚑{}", emp.name))
+            .unwrap_or_default();
         lines.push(format!(
-            "{} {}  pop {}  f{} w{} o{} m{} g{}{}",
+            "{} {}  pop {}  f{} w{} o{} m{} g{}{}{}",
             "◆", ruler, sim.pop(i),
-            t.stocks.food as i32, t.stocks.water as i32, t.stocks.ore as i32, t.stocks.meat as i32, t.stocks.gold as i32, mark
+            t.stocks.food as i32, t.stocks.water as i32, t.stocks.ore as i32, t.stocks.meat as i32, t.stocks.gold as i32, mark, emp_mark
         ));
+    }
+    let empires_line = sim
+        .empires
+        .iter()
+        .filter(|e| !e.members.is_empty())
+        .map(|e| format!("{} ({} городов)", e.name, e.members.len()))
+        .collect::<Vec<_>>()
+        .join("   ");
+    if !empires_line.is_empty() {
+        lines.push(format!("империи: {}", empires_line));
     }
     let (mut deer, mut boar, mut wolf, mut cow) = (0, 0, 0, 0);
     for a in &sim.animals {

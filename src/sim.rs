@@ -86,6 +86,9 @@ const DEFENSE_BARRACKS_BONUS: f32 = 0.2;
 pub const CHILD_AGE: u32 = 90;
 pub const OLD_AGE: u32 = 24000;
 
+const EMPIRE_EVERY: u64 = 400;
+const EMPIRE_EPOCH_P: u32 = 19;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -272,6 +275,15 @@ pub struct Settlement {
     pub blessing: Blessing,
     pub blessing_left: f64,
     pub plague_until: u64,
+    pub empire: Option<usize>,
+}
+
+pub struct Empire {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub name: String,
+    pub members: Vec<usize>,
 }
 
 pub struct Family {
@@ -316,6 +328,7 @@ pub struct Sim {
     pub agents: Vec<Agent>,
     pub towns: Vec<Settlement>,
     pub families: Vec<Family>,
+    pub empires: Vec<Empire>,
     pub animals: Vec<Animal>,
     pub caravans: Vec<Caravan>,
     pub tick_count: u64,
@@ -352,6 +365,7 @@ impl Sim {
             agents: Vec::new(),
             towns: Vec::new(),
             families: Vec::new(),
+            empires: Vec::new(),
             animals: Vec::new(),
             caravans: Vec::new(),
             tick_count: 0,
@@ -559,6 +573,7 @@ impl Sim {
                 blessing: Blessing::None,
                 blessing_left: 0.0,
                 plague_until: 0,
+                empire: None,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -1241,6 +1256,9 @@ impl Sim {
             self.reproduction();
         }
         self.sync_families();
+        if self.tick_count % EMPIRE_EVERY == 0 {
+            self.empire_step();
+        }
         self.war_step();
     }
 
@@ -2123,9 +2141,96 @@ impl Sim {
         d <= WAR_START_TOWN_RANGE
     }
 
+    fn empire_of(&self, ti: usize) -> Option<usize> {
+        self.towns[ti].empire
+    }
+
+    fn same_empire(&self, i: usize, j: usize) -> bool {
+        matches!((self.empire_of(i), self.empire_of(j)), (Some(a), Some(b)) if a == b)
+    }
+
+    fn empire_step(&mut self) {
+        let epoch = self.tick_count / EMPIRE_EVERY;
+        for i in 0..self.towns.len() {
+            if self.towns[i].at_war {
+                continue;
+            }
+            let h = self.brain(self.towns[i].x, self.towns[i].y, epoch);
+            if h % EMPIRE_EPOCH_P != 0 {
+                continue;
+            }
+            for j in 0..self.towns.len() {
+                if j == i || self.towns[j].at_war || !self.neighbors(i, j) || self.same_empire(i, j) {
+                    continue;
+                }
+                self.pact(i, j);
+                break;
+            }
+        }
+    }
+
+    fn pact(&mut self, i: usize, j: usize) {
+        let ei = self.towns[i].empire;
+        let ej = self.towns[j].empire;
+        match (ei, ej) {
+            (None, None) => self.form_empire(i, j),
+            (Some(e), None) => self.admit_town(e, j),
+            (None, Some(e)) => self.admit_town(e, i),
+            (Some(a), Some(b)) if a != b => self.merge_empires(a, b),
+            _ => {}
+        }
+    }
+
+    fn form_empire(&mut self, i: usize, j: usize) {
+        let h = self.brain(
+            self.towns[i].x + self.towns[j].x,
+            self.towns[i].y + self.towns[j].y,
+            0xE1E,
+        );
+        let r = (150 + h % 100) as u8;
+        let g = (110 + (h >> 8) % 110) as u8;
+        let b = (90 + (h >> 16) % 130) as u8;
+        let name = self
+            .families
+            .iter()
+            .filter(|f| f.town == i && !f.extinct)
+            .max_by_key(|f| f.members)
+            .map(|f| f.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| format!("Династия №{}", self.empires.len() + 1));
+        self.empires.push(Empire { r, g, b, name, members: vec![i, j] });
+        self.towns[i].empire = Some(self.empires.len() - 1);
+        self.towns[j].empire = Some(self.empires.len() - 1);
+    }
+
+    fn admit_town(&mut self, e: usize, t: usize) {
+        if let Some(emp) = self.empires.get_mut(e) {
+            emp.members.push(t);
+        }
+        self.towns[t].empire = Some(e);
+    }
+
+    fn merge_empires(&mut self, a: usize, b: usize) {
+        if let (Some(ea), Some(eb)) = (self.empires.get(a), self.empires.get(b)) {
+            let (keep, drop) = if ea.members.len() >= eb.members.len() { (a, b) } else { (b, a) };
+            let drop_members: Vec<usize> = self.empires[drop].members.clone();
+            self.empires[keep].members.extend(&drop_members);
+            for t in drop_members {
+                self.towns[t].empire = Some(keep);
+            }
+            self.empires[drop].members.clear();
+        }
+    }
+
     fn war_step(&mut self) {
         for i in 0..self.towns.len() {
             if self.towns[i].at_war {
+                if let Some(enemy) = self.towns[i].enemy {
+                    if enemy < self.towns.len() && self.same_empire(i, enemy) {
+                        self.end_war(i);
+                        continue;
+                    }
+                }
                 if self.towns[i].raiders <= 0 {
                     if self.pop(i) >= ARMY_TARGETS_POP {
                         let count = ((self.pop(i) as f32 * 0.3).min(6.0)) as u32;
@@ -2160,7 +2265,12 @@ impl Sim {
             }
         }
         for j in 0..self.towns.len() {
-            if j == ti || self.towns[j].at_war || !self.neighbors(ti, j) || self.pop(j) < RAID_TARGET_POP {
+            if j == ti
+                || self.towns[j].at_war
+                || !self.neighbors(ti, j)
+                || self.same_empire(ti, j)
+                || self.pop(j) < RAID_TARGET_POP
+            {
                 continue;
             }
             let mut r = 1.5f32;
@@ -2735,6 +2845,61 @@ mod tests {
         assert_eq!(s.towns[1].enemy, None);
         assert_eq!(s.towns[1].raiders, 0);
         assert!(s.agents.iter().all(|a| a.home != 1 || (!a.raider && a.target_town.is_none())));
+    }
+
+    #[test]
+    fn empires_form_between_peaceful_neighbors() {
+        let mut s = Sim::new(38);
+        prep_two_towns(&mut s);
+        let mut formed = false;
+        for e in 1..300 {
+            s.tick_count = e * EMPIRE_EVERY;
+            s.empire_step();
+            if s.empire_of(0) == s.empire_of(1) && s.empire_of(0).is_some() {
+                formed = true;
+                break;
+            }
+        }
+        assert!(formed, "peaceful neighbor towns should unite into an empire");
+        let e = s.empire_of(0).unwrap();
+        assert!(s.empires[e].members.contains(&0));
+        assert!(s.empires[e].members.contains(&1));
+    }
+
+    #[test]
+    fn empire_prevents_interior_raids() {
+        let mut s = Sim::new(39);
+        prep_two_towns(&mut s);
+        s.form_empire(0, 1);
+        assert_eq!(s.empire_of(0), s.empire_of(1));
+        for _ in 0..200 {
+            s.try_raid(0);
+            assert!(!s.towns[1].at_war, "empire members must not raid each other");
+        }
+        assert_eq!(s.towns[1].enemy, None);
+    }
+
+    #[test]
+    fn distinct_empires_merge_into_shared_color() {
+        let mut s = Sim::new(40);
+        prep_two_towns(&mut s);
+        s.form_empire(0, 1);
+        let id_a = s.empire_of(0).unwrap();
+        let id_b = s.empires.len();
+        s.empires.push(Empire {
+            r: 10,
+            g: 20,
+            b: 30,
+            name: "Тестовая".to_string(),
+            members: vec![2],
+        });
+        s.towns[2].empire = Some(id_b);
+        s.pact(0, 2);
+        let joined = s.empire_of(0).unwrap();
+        assert_eq!(s.empire_of(1), Some(joined));
+        assert_eq!(s.empire_of(2), Some(joined));
+        let total: usize = s.empires.iter().map(|e| e.members.len()).sum();
+        assert_eq!(total, 3, "all towns must remain in exactly one empire");
     }
 
     #[test]
