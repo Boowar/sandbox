@@ -772,6 +772,7 @@ pub fn draw(
                 crate::sim::ResourceKind::Ore => "rgb(228,190,84)",
                 crate::sim::ResourceKind::Meat => "rgb(232,120,96)",
                 crate::sim::ResourceKind::Gold => "rgb(255,222,120)",
+                crate::sim::ResourceKind::Fish => "rgb(100,180,255)",
             };
             ctx.set_fill_style_str(col);
             ctx.fill_rect(fx + 1.0, fy - 1.0, 3.0, 1.0);
@@ -996,10 +997,11 @@ for a in &sim.animals {
             let o = resource_icon(t.stocks.ore, 60.0);
             let m = resource_icon(t.stocks.meat, 60.0);
             let g = resource_icon(t.stocks.gold, 30.0);
+            let fi = resource_icon(t.stocks.fish, 40.0);
             lines.push(format!(
-                "◆ {} {} pop {}  {}{}{}{}{}  f{:<5.0} w{:<5.0} o{:<4.0} m{:<4.0} g{:<3.0}{}{}",
-                mood_s, ruler, pop, f, w, o, m, g,
-                t.stocks.food, t.stocks.water, t.stocks.ore, t.stocks.meat, t.stocks.gold,
+                "◆ {} {} pop {}  {}{}{}{}{}{}  f{:<5.0} w{:<5.0} o{:<4.0} m{:<4.0} g{:<3.0} i{:<4.0}{}{}",
+                mood_s, ruler, pop, f, w, o, m, g, fi,
+                t.stocks.food, t.stocks.water, t.stocks.ore, t.stocks.meat, t.stocks.gold, t.stocks.fish,
                 if mark.is_empty() { String::new() } else { format!(" {}", mark) }, emp_mark
             ));
         } else {
@@ -1164,6 +1166,7 @@ for a in &sim.animals {
             p.push(format!(" ⛏ ore   {:>5.0} [{}]", t.stocks.ore, res_bar(t.stocks.ore, 60.0)));
             p.push(format!(" 🥩 meat  {:>5.0} [{}]", t.stocks.meat, res_bar(t.stocks.meat, 60.0)));
             p.push(format!(" 💰 gold  {:>5.0} [{}]", t.stocks.gold, res_bar(t.stocks.gold, 30.0)));
+            p.push(format!(" 🐟 fish  {:>5.0} [{}]", t.stocks.fish, res_bar(t.stocks.fish, 40.0)));
             p.push(String::new());
 
             p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
