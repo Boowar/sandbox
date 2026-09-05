@@ -542,6 +542,14 @@ pub fn draw(
         };
         ctx.set_fill_style_str(role_col);
         ctx.fill_rect(fx + 3.0, fy + 2.0, 1.0, 1.0);
+        if a.age < crate::sim::CHILD_AGE {
+            ctx.set_fill_style_str("rgb(255,214,196)");
+            ctx.fill_rect(fx + 1.0, fy + 2.0, 1.0, 1.0);
+        }
+        if a.age > crate::sim::OLD_AGE {
+            ctx.set_fill_style_str("rgb(238,242,247)");
+            ctx.fill_rect(fx, fy - 1.0, 2.0, 1.0);
+        }
         if a.sick > 0 {
             ctx.set_fill_style_str("rgb(255,64,64)");
             ctx.fill_rect(fx + 3.0, fy + 4.0, 1.0, 1.0);

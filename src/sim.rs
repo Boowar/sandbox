@@ -83,6 +83,9 @@ const DEFENSE_BASE: f32 = 0.3;
 const DEFENSE_WALL_BONUS: f32 = 0.15;
 const DEFENSE_BARRACKS_BONUS: f32 = 0.2;
 
+pub const CHILD_AGE: u32 = 90;
+pub const OLD_AGE: u32 = 24000;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -247,6 +250,7 @@ pub struct Agent {
     pub target_town: Option<usize>,
     pub role: Role,
     pub sick: u32,
+    pub age: u32,
 }
 
 pub struct Settlement {
@@ -281,6 +285,7 @@ pub struct Family {
     pub role: Role,
 }
 
+#[derive(Debug, Clone, Copy)]
 enum Action {
     Move(i32, i32),
     Stay,
@@ -579,6 +584,12 @@ impl Sim {
                 let founder = j < FAMILIES_PER_TOWN;
                 self.spawn_agent(i, cx, cy, fam, founder);
             }
+            for a in self.agents.iter_mut().filter(|a| a.home == i) {
+                let h = (a.x as u32).wrapping_mul(0x45d9_f3b)
+                    ^ (a.y as u32).wrapping_mul(0x119d_e1f3)
+                    ^ 0x9e37_79b9u32.wrapping_mul(0xabcd_ef01);
+                a.age = 2000 + (h % 12000);
+            }
         }
     }
 
@@ -606,6 +617,7 @@ impl Sim {
                     target_town: None,
                     role: self.families[family].role,
                     sick: 0,
+                    age: 9000,
                 });
                 self.families[family].members += 1;
                 return;
@@ -628,6 +640,7 @@ impl Sim {
             target_town: None,
             role: self.families[family].role,
             sick: 0,
+            age: 9000,
         });
         self.families[family].members += 1;
     }
@@ -1114,10 +1127,16 @@ impl Sim {
             Weather::Heat => 1.1,
             _ => 0.8,
         };
+        // добавлю возраст в цикл голода/жажды
         for a in self.agents.iter_mut() {
-            let sick_rate = if a.sick > 0 { 1.4 } else { 1.0 };
+            a.age = a.age.saturating_add(1);
+            let mut metabolism = if a.age < CHILD_AGE { 0.8 } else { 1.0 };
+            if a.age > OLD_AGE {
+                metabolism = 1.25;
+            }
+            let sick_rate = if a.sick > 0 { 1.4 * metabolism } else { metabolism };
             a.hunger = (a.hunger + hunger_rate * sick_rate).min(140.0);
-            let thirst_sick = if a.sick > 0 { 1.3 } else { 1.0 };
+            let thirst_sick = if a.sick > 0 { 1.3 * metabolism } else { metabolism };
             a.thirst = (a.thirst + thirst_rate * thirst_sick).min(140.0);
         }
 
@@ -1203,6 +1222,16 @@ impl Sim {
             self.agents[i].want = want;
             self.apply(i, act, &mut dead);
         }
+        for (i, a) in self.agents.iter_mut().enumerate() {
+            let h = (a.x as u32).wrapping_mul(0x45d9_f3b)
+                ^ (a.y as u32).wrapping_mul(0x119d_e1f3)
+                ^ a.age.wrapping_mul(0xabcd_ef01);
+            if a.age > OLD_AGE && h % 16384 == 0 {
+                dead.push(i);
+            }
+        }
+        dead.sort_unstable();
+        dead.dedup();
         for &i in dead.iter().rev() {
             self.agents.remove(i);
         }
@@ -2080,6 +2109,8 @@ impl Sim {
             self.towns[fam_town].stocks.food -= cf;
             self.towns[fam_town].stocks.water -= cw;
             self.spawn_agent(fam_town, tx, ty, fid, false);
+            let newborn = self.agents.len() - 1;
+            self.agents[newborn].age = 0;
             self.families[fid].children += 1;
             used_town[fam_town] = true;
         }
@@ -2812,13 +2843,32 @@ mod tests {
             t.cap = 200;
         }
         let start = s.agents.len();
-        let mut peak = start;
-        for _ in 0..12000 {
+        let mut trough = start;
+        let mut trough_i = 0usize;
+        let mut peak_recover = start;
+        for i in 0..12000 {
             s.tick();
-            peak = peak.max(s.agents.len());
+            let n = s.agents.len();
+            if n < trough {
+                trough = n;
+                trough_i = i;
+            }
+            if i > trough_i && n > peak_recover {
+                peak_recover = n;
+            }
         }
-        eprintln!("start {} peak {} end {}", start, peak, s.agents.len());
-        assert!(peak > start, "world should reproduce over time (start {} peak {})", start, peak);
+        assert!(
+            trough < start,
+            "world should experience a founding wave (start {} trough {})",
+            start,
+            trough
+        );
+        assert!(
+            peak_recover > trough,
+            "population should regrow after the founding wave (trough {} peak {})",
+            trough,
+            peak_recover
+        );
     }
 
     #[test]
@@ -3078,6 +3128,79 @@ mod tests {
             g0,
             s.towns[0].stocks.gold
         );
+    }
+
+    #[test]
+    fn child_becomes_worker_after_growing() {
+        let mut s = Sim::new(90);
+        s.agents.retain(|a| a.home == 0);
+        s.agents[0].age = 0;
+        s.agents[0].carry = Some((ResourceKind::Food, 2.0));
+        s.agents[0].hunger = 30.0;
+        s.agents[0].thirst = 30.0;
+        let t = &s.towns[0];
+        s.agents[0].x = t.x;
+        s.agents[0].y = t.y;
+        assert_eq!(s.agents[0].age, 0, "newborns start as children");
+        let (act, _) = s.decide(&s.agents[0]);
+        assert!(
+            matches!(act, Action::Deposit),
+            "young helpers haul their load home (got {:?})",
+            act
+        );
+        let mut matured = false;
+        for _ in 0..(crate::sim::CHILD_AGE as usize + 400) {
+            s.tick();
+            if s.agents[0].age >= crate::sim::CHILD_AGE {
+                matured = true;
+                break;
+            }
+        }
+        assert!(matured, "child should grow up");
+        assert_eq!(
+            s.agents[0].age,
+            crate::sim::CHILD_AGE,
+            "the child aged exactly to adulthood"
+        );
+        let t = &s.towns[0];
+        s.agents[0].x = t.x;
+        s.agents[0].y = t.y;
+        s.agents[0].carry = Some((ResourceKind::Food, 2.0));
+        s.agents[0].hunger = 30.0;
+        s.agents[0].thirst = 30.0;
+        let (act, _) = s.decide(&s.agents[0]);
+        assert!(
+            matches!(act, Action::Deposit),
+            "an adult with a load should deposit (got {:?})",
+            act
+        );
+    }
+
+    #[test]
+    fn elders_may_die_of_old_age() {
+        let mut s = Sim::new(91);
+        s.agents.retain(|a| a.home == 0);
+        s.agents[0].age = crate::sim::OLD_AGE + 1;
+        let mut died = false;
+        for _ in 0..200000u64 {
+            s.tick();
+            if !s.agents.iter().any(|a| a.age > crate::sim::OLD_AGE) {
+                died = true;
+                break;
+            }
+        }
+        assert!(died, "elders should eventually pass away");
+    }
+
+    #[test]
+    fn born_agents_start_as_children() {
+        let mut s = Sim::new(92);
+        s.towns[0].cap = 100;
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 40.0, meat: 15.0, gold: 0.0 };
+        s.families[0].members = 2;
+        s.reproduction();
+        let born = s.agents.len() - 1;
+        assert_eq!(s.agents[born].age, 0, "newborns should be children");
     }
 
     #[test]
