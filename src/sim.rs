@@ -509,7 +509,6 @@ impl Sim {
         sim.ensure_hills();
         sim.spawn_world();
         sim.spawn_animals();
-        sim.build_roads();
         sim
     }
 
@@ -933,40 +932,6 @@ impl Sim {
 
     fn is_domestic_cow(&self, an: &Animal) -> bool {
         an.species == Species::Cow && an.home.is_some()
-    }
-
-    fn build_roads(&mut self) {
-        let towns: Vec<(i32, i32)> = self.towns.iter().map(|t| (t.x, t.y)).collect();
-        for i in 0..towns.len() {
-            for j in (i + 1)..towns.len() {
-                let (x0, y0) = towns[i];
-                let (x1, y1) = towns[j];
-                let dx = (x1 - x0).abs();
-                let dy = (y1 - y0).abs();
-                let sx = if x0 < x1 { 1 } else { -1 };
-                let sy = if y0 < y1 { 1 } else { -1 };
-                let mut err = dx - dy;
-                let mut cx = x0;
-                let mut cy = y0;
-                loop {
-                    if in_bounds(cx, cy) {
-                        self.roads[idx(cx, cy)] = true;
-                    }
-                    if cx == x1 && cy == y1 {
-                        break;
-                    }
-                    let e2 = 2 * err;
-                    if e2 > -dy {
-                        err -= dy;
-                        cx += sx;
-                    }
-                    if e2 < dx {
-                        err += dx;
-                        cy += sy;
-                    }
-                }
-            }
-        }
     }
 
     fn domestic_herd(&self, ti: usize) -> usize {
@@ -1607,13 +1572,14 @@ impl Sim {
             for y in 0..H {
                 for x in 0..W {
                     let i = idx(x as i32, y as i32);
+                    let on_road = self.roads[i];
                     match self.grid[i].terrain {
-                        Terrain::Forest => {
+                        Terrain::Forest if !on_road => {
                             let k = (self.grid[i].food / FOOD_MAX).max(0.3);
                             let ber = berry * season_berry * k + if abundant { 1.0 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
                         }
-                        Terrain::Farm => {
+                        Terrain::Farm if !on_road => {
                             let cr = crop * season_crop + if abundant { 1.0 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
                         }
@@ -1640,21 +1606,22 @@ impl Sim {
                                 }
                             }
                         }
-                        Terrain::Hills | Terrain::Grass => {}
-                        Terrain::Jungle => {
+                        Terrain::Hills | Terrain::Grass | Terrain::Forest => {}
+                        Terrain::Jungle if !on_road => {
                             let k = (self.grid[i].food / (FOOD_MAX * 1.5)).max(0.3);
                             let ber = berry * season_berry * 1.3 * k + if abundant { 1.5 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 1.5);
                         }
-                        Terrain::Tundra => {
+                        Terrain::Tundra if !on_road => {
                             let k = (self.grid[i].food / (FOOD_MAX * 0.4)).max(0.2);
                             let ber = berry * season_berry * 0.4 * k;
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 0.4);
                         }
-                        Terrain::Desert => {
+                        Terrain::Desert if !on_road => {
                             let ber = berry * season_berry * 0.1;
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 0.1);
                         }
+                        _ => {}
                     }
                 }
             }
@@ -3035,6 +3002,22 @@ impl Sim {
         }
     }
 
+    fn can_road_at(&self, x: i32, y: i32) -> bool {
+        if !in_bounds(x, y) { return false; }
+        let c = &self.grid[idx(x, y)];
+        c.terrain != Terrain::Water && c.terrain != Terrain::Hills
+    }
+
+    pub fn toggle_road(&mut self, x: i32, y: i32) {
+        if !in_bounds(x, y) { return; }
+        let i = idx(x, y);
+        if self.roads[i] {
+            self.roads[i] = false;
+        } else if self.can_road_at(x, y) {
+            self.roads[i] = true;
+        }
+    }
+
     fn build_road_between(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
         let dx = (x1 - x0).abs();
         let dy = (y1 - y0).abs();
@@ -3044,7 +3027,7 @@ impl Sim {
         let mut cx = x0;
         let mut cy = y0;
         loop {
-            if in_bounds(cx, cy) {
+            if self.can_road_at(cx, cy) {
                 self.roads[idx(cx, cy)] = true;
             }
             if cx == x1 && cy == y1 {
@@ -5948,5 +5931,85 @@ fn marriages_form_and_cheapen_births() {
         assert_eq!(s2.season, s.season);
         assert_eq!(s2.day_phase, s.day_phase);
         assert_eq!(s2.alliances, s.alliances);
+    }
+
+    #[test]
+    fn road_toggle_on_grass() {
+        let mut s = Sim::new(1);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        let rx = tx + 10;
+        let ry = ty;
+        if in_bounds(rx, ry) && s.grid[idx(rx, ry)].terrain == Terrain::Grass {
+            assert!(!s.roads[idx(rx, ry)]);
+            s.toggle_road(rx, ry);
+            assert!(s.roads[idx(rx, ry)]);
+            s.toggle_road(rx, ry);
+            assert!(!s.roads[idx(rx, ry)]);
+        }
+    }
+
+    #[test]
+    fn road_cannot_build_on_water() {
+        let mut s = Sim::new(1);
+        for y in 0..H as i32 {
+            for x in 0..W as i32 {
+                if s.grid[idx(x, y)].terrain == Terrain::Water {
+                    s.toggle_road(x, y);
+                    assert!(!s.roads[idx(x, y)], "road must not be placed on water");
+                    return;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn road_cannot_build_on_hills() {
+        let mut s = Sim::new(1);
+        for y in 0..H as i32 {
+            for x in 0..W as i32 {
+                if s.grid[idx(x, y)].terrain == Terrain::Hills {
+                    s.toggle_road(x, y);
+                    assert!(!s.roads[idx(x, y)], "road must not be placed on hills/ore");
+                    return;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn road_can_build_on_tundra() {
+        let mut s = Sim::new(1);
+        for y in 0..H as i32 {
+            for x in 0..W as i32 {
+                if s.grid[idx(x, y)].terrain == Terrain::Tundra {
+                    s.toggle_road(x, y);
+                    assert!(s.roads[idx(x, y)], "road must be allowed on tundra/snow");
+                    return;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn forest_does_not_regrow_on_road() {
+        let mut s = Sim::new(1);
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        let mut found_forest = false;
+        for dy in -10..=10 {
+            for dx in -10..=10 {
+                let (fx, fy) = (tx + dx, ty + dy);
+                if in_bounds(fx, fy) && s.grid[idx(fx, fy)].terrain == Terrain::Forest {
+                    s.roads[idx(fx, fy)] = true;
+                    let before = s.grid[idx(fx, fy)].food;
+                    while s.tick_count % REGROW_EVERY != 0 { s.tick_count += 1; }
+                    s.tick();
+                    let after = s.grid[idx(fx, fy)].food;
+                    assert_eq!(before, after, "forest food on road must not regrow");
+                    found_forest = true;
+                    break;
+                }
+            }
+            if found_forest { break; }
+        }
     }
 }

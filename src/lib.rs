@@ -31,13 +31,16 @@ struct App {
     inspire_mode: bool,
     build_mode: bool,
     build_terrain: sim::Terrain,
+    road_mode: bool,
     pending_bless: Vec<(usize, usize)>,
     pending_build: Vec<(usize, usize)>,
+    pending_road: Vec<(usize, usize)>,
     effects: Vec<render::Fx>,
     btn_pause: Element,
     btn_bless: Element,
     btn_inspire: Element,
     _btn_build: Element,
+    _btn_road: Element,
     speed_lbl: Element,
     speed: f64,
     acc: f64,
@@ -104,6 +107,16 @@ impl App {
             }
             render::draw_terrain(&self.terrain_ctx, &sim);
         }
+        if !self.pending_road.is_empty() {
+            let pts: Vec<(usize, usize)> = self.pending_road.drain(..).collect();
+            let mut sim = self.sim.borrow_mut();
+            for (x, y) in pts {
+                if x < sim::W && y < sim::H {
+                    sim.toggle_road(x as i32, y as i32);
+                }
+            }
+            render::draw_terrain(&self.terrain_ctx, &sim);
+        }
 
         let dt = ((now - self.last) / 1000.0).max(0.0).min(0.1);
         self.last = now;
@@ -156,6 +169,14 @@ impl App {
             .set_inner_html(if self.bless_mode { "🌱ON" } else { "🌱" });
         self.btn_inspire
             .set_inner_html(if self.inspire_mode { "💡ON" } else { "💡" });
+        if let Some(doc) = self.btn_bless.parent_element().and_then(|p| p.owner_document()) {
+            if let Some(el) = doc.get_element_by_id("btnBuild") {
+                let _ = el.set_inner_html(if self.build_mode { "🏗ON" } else { "🏗" });
+            }
+            if let Some(el) = doc.get_element_by_id("btnRoad") {
+                let _ = el.set_inner_html(if self.road_mode { "🛤ON" } else { "🛤" });
+            }
+        }
         self.speed_lbl.set_inner_html(&format!("x{:.1}", self.speed));
     }
 
@@ -169,6 +190,7 @@ impl App {
         if self.bless_mode {
             self.inspire_mode = false;
             self.build_mode = false;
+            self.road_mode = false;
         }
         self.sync_ui();
     }
@@ -178,6 +200,7 @@ impl App {
         if self.inspire_mode {
             self.bless_mode = false;
             self.build_mode = false;
+            self.road_mode = false;
         }
         self.sync_ui();
     }
@@ -187,6 +210,17 @@ impl App {
         if self.build_mode {
             self.bless_mode = false;
             self.inspire_mode = false;
+            self.road_mode = false;
+        }
+        self.sync_ui();
+    }
+
+    fn toggle_road_mode(&mut self) {
+        self.road_mode = !self.road_mode;
+        if self.road_mode {
+            self.bless_mode = false;
+            self.inspire_mode = false;
+            self.build_mode = false;
         }
         self.sync_ui();
     }
@@ -451,8 +485,16 @@ impl App {
         }
     }
 
+    fn road_at(&mut self, client_x: i32, client_y: i32) {
+        if self.road_mode {
+            if let Some((x, y)) = self.to_grid(client_x as f64, client_y as f64) {
+                self.pending_road.push((x, y));
+            }
+        }
+    }
+
     fn select_town_at(&mut self, client_x: i32, client_y: i32) {
-        if self.bless_mode || self.inspire_mode || self.build_mode {
+        if self.bless_mode || self.inspire_mode || self.build_mode || self.road_mode {
             return;
         }
         if let Some((gx, gy)) = self.to_grid(client_x as f64, client_y as f64) {
@@ -516,6 +558,7 @@ impl App {
             "i" | "I" | "ш" | "Ш" => self.toggle_inspire(),
             "n" | "N" | "т" | "Т" => self.toggle_build(),
             "m" | "M" | "ь" | "Ь" => self.cycle_build_terrain(),
+            "d" | "D" | "в" | "В" => self.toggle_road_mode(),
             "w" | "W" | "ц" | "Ц" => self.cycle_weather(),
             "1" => self.build(sim::BuildingKind::House),
             "2" => self.build(sim::BuildingKind::Well),
@@ -576,6 +619,7 @@ pub fn start() -> Result<(), JsValue> {
     let btn_bless = document.get_element_by_id("btnBless").ok_or("no btnBless")?;
     let btn_inspire = document.get_element_by_id("btnInspire").ok_or("no btnInspire")?;
     let btn_build = document.get_element_by_id("btnBuild").ok_or("no btnBuild")?;
+    let btn_road = document.get_element_by_id("btnRoad").ok_or("no btnRoad")?;
     let speed_lbl = document.get_element_by_id("speedlbl").ok_or("no speedlbl")?;
 
     let seed = Date::now() as u64;
@@ -592,13 +636,16 @@ pub fn start() -> Result<(), JsValue> {
         inspire_mode: false,
         build_mode: false,
         build_terrain: sim::Terrain::Forest,
+        road_mode: false,
         pending_bless: Vec::new(),
         pending_build: Vec::new(),
+        pending_road: Vec::new(),
         effects: Vec::new(),
         btn_pause: btn_pause.clone(),
         btn_bless: btn_bless.clone(),
         btn_inspire: btn_inspire.clone(),
         _btn_build: btn_build.clone(),
+        _btn_road: btn_road.clone(),
         speed_lbl,
         speed: 2.0,
         acc: 0.0,
@@ -648,6 +695,8 @@ pub fn start() -> Result<(), JsValue> {
                     app.inspire_at(e.client_x(), e.client_y());
                 } else if app.build_mode {
                     app.build_terrain_at(e.client_x(), e.client_y());
+                } else if app.road_mode {
+                    app.road_at(e.client_x(), e.client_y());
                 } else {
                     app.select_town_at(e.client_x(), e.client_y());
                 }
@@ -680,6 +729,8 @@ pub fn start() -> Result<(), JsValue> {
                     // остаёмся на месте: тап применяет идею, панорама отключена
                 } else if app.build_mode {
                     app.build_terrain_at(e.client_x(), e.client_y());
+                } else if app.road_mode {
+                    app.road_at(e.client_x(), e.client_y());
                 } else {
                     app.pan_by(px - prev_x, py - prev_y);
                 }
@@ -741,6 +792,7 @@ pub fn start() -> Result<(), JsValue> {
     bind_click(&btn_bless, &app, |a| a.toggle_bless())?;
     bind_click(&btn_inspire, &app, |a| a.toggle_inspire())?;
     bind_click(&btn_build, &app, |a| a.toggle_build())?;
+    bind_click(&btn_road, &app, |a| a.toggle_road_mode())?;
     bind_click(&document.get_element_by_id("btnWeather").ok_or("no btnWeather")?, &app, |a| {
         a.cycle_weather()
     })?;
