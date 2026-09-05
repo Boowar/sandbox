@@ -89,6 +89,17 @@ pub const OLD_AGE: u32 = 24000;
 const EMPIRE_EVERY: u64 = 400;
 const EMPIRE_EPOCH_P: u32 = 19;
 
+const TOWNS_EVERY: u64 = 800;
+const FOUND_MIN_POP: usize = 14;
+const FOUND_MIN_FOOD: f32 = 220.0;
+const FOUND_MIN_WATER: f32 = 140.0;
+const FOUND_EPOCH_P: u32 = 5;
+const FOUND_RADIUS_MIN: i32 = 12;
+const FOUND_RADIUS_MAX: i32 = 40;
+const FOUND_COLONY_POP: usize = 4;
+const MAX_TOWNS: usize = 10;
+const TOWN_WASTE_NEED: u64 = 3;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Weather {
     Clear,
@@ -276,6 +287,8 @@ pub struct Settlement {
     pub blessing_left: f64,
     pub plague_until: u64,
     pub empire: Option<usize>,
+    pub alive: bool,
+    pub waste: u64,
 }
 
 pub struct Empire {
@@ -574,6 +587,8 @@ impl Sim {
                 blessing_left: 0.0,
                 plague_until: 0,
                 empire: None,
+                alive: true,
+                waste: 0,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -776,6 +791,9 @@ impl Sim {
 
     fn market_buy(&mut self) {
         for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive {
+                continue;
+            }
             if !self.has_trade_post(ti) {
                 continue;
             }
@@ -815,6 +833,9 @@ impl Sim {
         for ti in 0..self.towns.len() {
             if self.caravans.len() >= CARAVAN_MAX {
                 break;
+            }
+            if !self.towns[ti].alive {
+                continue;
             }
             let (has_post, at_war, x, y) = {
                 let t = &self.towns[ti];
@@ -864,7 +885,7 @@ impl Sim {
             let mut best: Option<usize> = None;
             let mut bd = i32::MAX;
             for tj in 0..self.towns.len() {
-                if tj == ti {
+                if tj == ti || !self.towns[tj].alive {
                     continue;
                 }
                 let (tx2, ty2) = (self.towns[tj].x, self.towns[tj].y);
@@ -887,7 +908,7 @@ impl Sim {
                     let mut bb: Option<usize> = None;
                     let mut bd2 = i32::MAX;
                     for tj in 0..self.towns.len() {
-                        if tj == ti {
+                        if tj == ti || !self.towns[tj].alive {
                             continue;
                         }
                         let d = self.cheb(x, y, self.towns[tj].x, self.towns[tj].y);
@@ -1084,6 +1105,9 @@ impl Sim {
 
     fn construction(&mut self) {
         for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive {
+                continue;
+            }
             let apply = {
                 let t = &mut self.towns[ti];
                 if t.queue.is_empty() {
@@ -1182,6 +1206,9 @@ impl Sim {
         }
 
         for t in self.towns.iter_mut() {
+            if !t.alive {
+                continue;
+            }
             let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
             if wells > 0 {
                 t.stocks.water = (t.stocks.water + WELL_WATER_PER_TICK * wells as f32).min(200.0);
@@ -1260,6 +1287,9 @@ impl Sim {
             self.empire_step();
         }
         self.war_step();
+        if self.tick_count % TOWNS_EVERY == 0 {
+            self.town_lifecycle();
+        }
     }
 
     fn weather_breath(&mut self) {
@@ -2017,6 +2047,10 @@ impl Sim {
 
     fn plague_step(&mut self) {
         for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive {
+                self.towns[ti].plague_until = 0;
+                continue;
+            }
             if self.towns[ti].plague_until > 0 {
                 self.towns[ti].plague_until -= 1;
                 let cure = self.towns[ti].built.iter().any(|b| *b == BuildingKind::Clinic);
@@ -2152,7 +2186,7 @@ impl Sim {
     fn empire_step(&mut self) {
         let epoch = self.tick_count / EMPIRE_EVERY;
         for i in 0..self.towns.len() {
-            if self.towns[i].at_war {
+            if !self.towns[i].alive || self.towns[i].at_war {
                 continue;
             }
             let h = self.brain(self.towns[i].x, self.towns[i].y, epoch);
@@ -2160,7 +2194,12 @@ impl Sim {
                 continue;
             }
             for j in 0..self.towns.len() {
-                if j == i || self.towns[j].at_war || !self.neighbors(i, j) || self.same_empire(i, j) {
+                if j == i
+                    || !self.towns[j].alive
+                    || self.towns[j].at_war
+                    || !self.neighbors(i, j)
+                    || self.same_empire(i, j)
+                {
                     continue;
                 }
                 self.pact(i, j);
@@ -2222,11 +2261,175 @@ impl Sim {
         }
     }
 
+    fn town_lifecycle(&mut self) {
+        let epoch = self.tick_count / TOWNS_EVERY;
+        for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive {
+                continue;
+            }
+            let ruined = self.pop(ti) == 0 && self.towns[ti].stocks.food < 12.0 && self.towns[ti].stocks.water < 8.0;
+            let waste = if ruined { self.towns[ti].waste + 1 } else { 0 };
+            self.towns[ti].waste = waste;
+            if waste >= TOWN_WASTE_NEED {
+                self.destroy_town(ti);
+            }
+        }
+        if self.towns.len() >= MAX_TOWNS {
+            return;
+        }
+        for mi in 0..self.towns.len() {
+            if self.towns.len() >= MAX_TOWNS {
+                break;
+            }
+            if !self.towns[mi].alive {
+                continue;
+            }
+            let t = &self.towns[mi];
+            if self.pop(mi) < FOUND_MIN_POP || t.stocks.food < FOUND_MIN_FOOD || t.stocks.water < FOUND_MIN_WATER {
+                continue;
+            }
+            if self.brain(t.x, t.y, epoch) % FOUND_EPOCH_P != 0 {
+                continue;
+            }
+            if let Some((x, y)) = self.colony_spot(mi) {
+                self.found_colony(mi, x, y);
+            }
+        }
+    }
+
+    fn colony_spot(&self, mi: usize) -> Option<(i32, i32)> {
+        let (mx, my) = (self.towns[mi].x, self.towns[mi].y);
+        let mut best: Option<(i32, i32)> = None;
+        let mut bd = i32::MAX;
+        for dy in -FOUND_RADIUS_MAX..=FOUND_RADIUS_MAX {
+            for dx in -FOUND_RADIUS_MAX..=FOUND_RADIUS_MAX {
+                let d = dx.abs().max(dy.abs());
+                if d < FOUND_RADIUS_MIN || d > FOUND_RADIUS_MAX {
+                    continue;
+                }
+                let x = mx + dx;
+                let y = my + dy;
+                if !in_bounds(x, y) || self.grid[idx(x, y)].terrain != Terrain::Grass {
+                    continue;
+                }
+                let mut too_close = false;
+                for t in &self.towns {
+                    if t.alive && ((x - t.x).abs().max(y - t.y)) < FOUND_RADIUS_MIN {
+                        too_close = true;
+                        break;
+                    }
+                }
+                if too_close {
+                    continue;
+                }
+                if d < bd {
+                    bd = d;
+                    best = Some((x, y));
+                }
+            }
+        }
+        best
+    }
+
+    fn found_colony(&mut self, _mi: usize, x: i32, y: i32) {
+        let h = self.brain(x, y, 0xF0C0);
+        let r = (150 + h % 100) as u8;
+        let g = (110 + (h >> 8) % 110) as u8;
+        let b = (90 + (h >> 16) % 130) as u8;
+        for dy in -4..=4 {
+            for dx in -4..=4 {
+                let nx = x + dx;
+                let ny = y + dy;
+                if in_bounds(nx, ny) {
+                    self.grid[idx(nx, ny)].terrain = Terrain::Grass;
+                }
+            }
+        }
+        self.towns.push(Settlement {
+            x,
+            y,
+            stocks: Stock { food: 45.0, water: 35.0, ore: 15.0, meat: 8.0, gold: 0.0 },
+            r,
+            g,
+            b,
+            cap: 12,
+            queue: Vec::new(),
+            built: Vec::new(),
+            at_war: false,
+            raiders: 0,
+            enemy: None,
+            idea: TownIdea::None,
+            idea_left: 0.0,
+            faith: 0.0,
+            blessing: Blessing::None,
+            blessing_left: 0.0,
+            plague_until: 0,
+            empire: None,
+            alive: true,
+            waste: 0,
+        });
+        let ti = self.towns.len() - 1;
+        let fid = self.families.len();
+        self.families.push(Family {
+            id: fid,
+            town: ti,
+            members: FOUND_COLONY_POP as u32,
+            children: 0,
+            name: Self::family_name(&mut self.rng),
+            extinct: false,
+            accent: Self::family_accent(0, r, g, b),
+            role: Role::Worker,
+        });
+        for k in 0..FOUND_COLONY_POP {
+            self.spawn_agent(ti, x, y, fid, k < 2);
+        }
+        for a in self.agents.iter_mut().filter(|a| a.home == ti) {
+            let hh = (a.x as u32).wrapping_mul(0x45d9_f3b)
+                ^ (a.y as u32).wrapping_mul(0x119d_e1f3)
+                ^ 0x9e37_79b9u32.wrapping_mul(0xabcd_ef01);
+            a.age = 2000 + (hh % 12000);
+        }
+    }
+
+    fn destroy_town(&mut self, ti: usize) {
+        let t = &mut self.towns[ti];
+        t.alive = false;
+        t.at_war = false;
+        t.raiders = 0;
+        t.enemy = None;
+        t.queue.clear();
+        t.idea = TownIdea::None;
+        t.blessing = Blessing::None;
+        t.stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0 };
+        if let Some(e) = t.empire {
+            if let Some(emp) = self.empires.get_mut(e) {
+                emp.members.retain(|&m| m != ti);
+            }
+        }
+        t.empire = None;
+        for f in self.families.iter_mut() {
+            if f.town == ti {
+                f.extinct = true;
+                f.members = 0;
+                f.children = 0;
+            }
+        }
+        for a in self.animals.iter_mut() {
+            if a.species == Species::Cow && a.home == Some(ti) {
+                a.home = None;
+            }
+        }
+        self.caravans.retain(|c| c.home != ti && c.target != ti);
+    }
+
     fn war_step(&mut self) {
         for i in 0..self.towns.len() {
+            if !self.towns[i].alive {
+                continue;
+            }
             if self.towns[i].at_war {
                 if let Some(enemy) = self.towns[i].enemy {
-                    if enemy < self.towns.len() && self.same_empire(i, enemy) {
+                    if enemy < self.towns.len() && (self.same_empire(i, enemy) || !self.towns[enemy].alive) {
                         self.end_war(i);
                         continue;
                     }
@@ -2255,6 +2458,9 @@ impl Sim {
     }
 
     fn try_raid(&mut self, ti: usize) {
+        if !self.towns[ti].alive {
+            return;
+        }
         if self.pop(ti) < WAR_START_POP {
             return;
         }
@@ -2266,6 +2472,7 @@ impl Sim {
         }
         for j in 0..self.towns.len() {
             if j == ti
+                || !self.towns[j].alive
                 || self.towns[j].at_war
                 || !self.neighbors(ti, j)
                 || self.same_empire(ti, j)
@@ -2900,6 +3107,74 @@ mod tests {
         assert_eq!(s.empire_of(2), Some(joined));
         let total: usize = s.empires.iter().map(|e| e.members.len()).sum();
         assert_eq!(total, 3, "all towns must remain in exactly one empire");
+    }
+
+    #[test]
+    fn ruined_town_dies_and_cleans_up() {
+        let mut s = Sim::new(41);
+        prep_two_towns(&mut s);
+        s.form_empire(0, 1);
+        let cow = s.animals.iter().find(|a| a.species == Species::Cow && a.home == Some(0)).is_some();
+        assert!(cow, "world spawns domestic cows");
+        s.agents.retain(|a| a.home != 0);
+        s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0 };
+        s.towns[0].waste = TOWN_WASTE_NEED - 1;
+        s.tick_count = TOWNS_EVERY * 3;
+        s.town_lifecycle();
+        assert!(!s.towns[0].alive, "abandoned town should be ruined");
+        assert_eq!(s.pop(0), 0);
+        assert!(s.families.iter().filter(|f| f.town == 0).all(|f| f.extinct));
+        assert!(s.animals.iter().all(|a| a.home != Some(0)), "cows are released");
+        let e = s.empire_of(1).unwrap();
+        assert!(!s.empires[e].members.contains(&0), "ruin leaves its empire");
+    }
+
+    #[test]
+    fn thriving_town_founds_colony() {
+        let mut s = Sim::new(42);
+        prep_two_towns(&mut s);
+        while s.pop(0) < FOUND_MIN_POP {
+            let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+            s.spawn_agent(0, tx, ty, 0, false);
+        }
+        s.towns[0].stocks = Stock { food: 300.0, water: 200.0, ore: 40.0, meat: 15.0, gold: 0.0 };
+        let start = s.towns.len();
+        let mut founded = false;
+        for k in 1..200 {
+            s.tick_count = k * TOWNS_EVERY;
+            s.town_lifecycle();
+            if s.towns.len() > start {
+                founded = true;
+                break;
+            }
+        }
+        assert!(founded, "thriving crowded town should found a colony");
+        let ti = s.towns.len() - 1;
+        let c = &s.towns[ti];
+        assert!(c.alive);
+        assert!(s.pop(ti) >= FOUND_COLONY_POP);
+        for t in &s.towns {
+            if t.alive && t.x != c.x {
+                let d = (c.x - t.x).abs().max(c.y - t.y);
+                assert!(d >= FOUND_RADIUS_MIN as i32 || d == 0, "colony keeps distance");
+            }
+        }
+    }
+
+    #[test]
+    fn collapsed_town_ruins_over_ticks() {
+        let mut s = Sim::new(43);
+        s.agents.retain(|a| a.home != 0);
+        s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0 };
+        let mut died = false;
+        for _ in 0..(TOWN_WASTE_NEED * 2 * TOWNS_EVERY + 800) {
+            s.tick();
+            if !s.towns[0].alive {
+                died = true;
+                break;
+            }
+        }
+        assert!(died, "town abandoned long enough should become a ruin");
     }
 
     #[test]

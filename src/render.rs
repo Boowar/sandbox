@@ -173,6 +173,18 @@ fn draw_house(ctx: &CanvasRenderingContext2d, ox: f64, oy: f64, r: u8, g: u8, b:
     ctx.fill_rect(ox + 11.0, oy - 9.0, 1.0, 7.0);
 }
 
+fn draw_ruin(ctx: &CanvasRenderingContext2d, ox: f64, oy: f64) {
+    ctx.set_fill_style_str("rgb(88,93,100)");
+    ctx.fill_rect(ox + 3.0, oy + 1.0, 16.0, 11.0);
+    ctx.fill_rect(ox + 9.0, oy - 3.0, 8.0, 4.0);
+    ctx.set_fill_style_str("rgb(48,52,58)");
+    ctx.fill_rect(ox + 4.0, oy + 1.0, 14.0, 2.0);
+    ctx.fill_rect(ox + 4.0, oy + 10.0, 14.0, 2.0);
+    ctx.fill_rect(ox + 10.0, oy - 3.0, 6.0, 2.0);
+    ctx.set_fill_style_str("rgb(66,70,76)");
+    ctx.fill_rect(ox + 8.0, oy + 4.0, 2.0, 5.0);
+}
+
 fn draw_agent(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64, r: u8, g: u8, b: u8, facing: i32, leg: usize) {
     ctx.set_fill_style_str("rgba(0,0,0,0.15)");
     ctx.fill_rect(cx, cy + 6.0, 4.0, 1.0);
@@ -455,6 +467,16 @@ pub fn draw(
         .collect();
 
     for (i, t) in sim.towns.iter().enumerate() {
+        if !t.alive {
+            draw_ruin(ctx, t.x as f64 * CELL - 3.0, t.y as f64 * CELL - 2.0);
+            ctx.set_fill_style_str("rgb(238,90,74)");
+            ctx.fill_rect(t.x as f64 * CELL + 8.0, t.y as f64 * CELL - 8.0, 2.0, 6.0);
+            ctx.fill_rect(t.x as f64 * CELL + 4.0, t.y as f64 * CELL - 4.0, 10.0, 2.0);
+            ctx.set_font("11px ui-monospace, monospace");
+            ctx.set_fill_style_str("rgb(150,156,164)");
+            let _ = ctx.fill_text("0", t.x as f64 * CELL + 13.0, t.y as f64 * CELL - 4.0);
+            continue;
+        }
         let (tr, tg, tb) = town_col[i];
         draw_house(ctx, t.x as f64 * CELL - 3.0, t.y as f64 * CELL - 2.0, tr, tg, tb);
         if t.at_war {
@@ -738,6 +760,7 @@ for a in &sim.animals {
     if !bless_name.is_empty() {
         lines.push(format!("благословение: {}", bless_name));
     }
+    let mut town_rows: Vec<(usize, usize)> = Vec::new();
     for (i, t) in sim.towns.iter().enumerate() {
         let ruler = sim
             .families
@@ -747,6 +770,12 @@ for a in &sim.animals {
             .map(|f| f.name.as_str())
             .filter(|n| !n.is_empty())
             .unwrap_or("?");
+        if !t.alive {
+            let row = lines.len();
+            lines.push(format!("☠ {}  разорён", ruler));
+            town_rows.push((row, i));
+            continue;
+        }
         let mark = if t.at_war {
             "  ⚔"
         } else {
@@ -762,11 +791,13 @@ for a in &sim.animals {
             .and_then(|e| sim.empires.get(e))
             .map(|emp| format!("  ⚑{}", emp.name))
             .unwrap_or_default();
+        let row = lines.len();
         lines.push(format!(
             "{} {}  pop {}  f{} w{} o{} m{} g{}{}{}",
             "◆", ruler, sim.pop(i),
             t.stocks.food as i32, t.stocks.water as i32, t.stocks.ore as i32, t.stocks.meat as i32, t.stocks.gold as i32, mark, emp_mark
         ));
+        town_rows.push((row, i));
     }
     let empires_line = sim
         .empires
@@ -795,7 +826,7 @@ for a in &sim.animals {
             .filter(|a| a.species == Species::Cow && a.home.is_some())
             .count()
     ));
-    lines.push(format!("dynasties {}  extinct {}  ideas {}  wars {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count()));
+    lines.push(format!("dynasties {}  extinct {}  ideas {}  wars {}  ruins {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count(), sim.towns.iter().filter(|t| !t.alive).count()));
     let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
     let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
     lines.push(format!("gold {}  caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
@@ -805,14 +836,24 @@ for a in &sim.animals {
     lines.push("Space: пауза   B: 🌱   I: 💡 идея городу   W: ⛅ погода".to_string());
     lines.push("1: 🏠  2: ⛲  3: 🏦  4: 🌾  5: ⛪  6: ⛑  7: ⛋  8: ⛩   C: 🐄   R: новый мир".to_string());
     ctx.set_fill_style_str("rgba(10,14,18,0.72)");
-    ctx.fill_rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
+    ctx.fill_rect(4.0, 4.0, 346.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.set_stroke_style_str("rgb(70,78,90)");
     ctx.begin_path();
-    ctx.rect(4.0, 4.0, 300.0, 14.0 + lines.len() as f64 * 15.0);
+    ctx.rect(4.0, 4.0, 346.0, 14.0 + lines.len() as f64 * 15.0);
     ctx.stroke();
     ctx.set_font("13px ui-monospace, monospace");
+    let mut chips: Vec<Option<(u8, u8, u8)>> = vec![None; lines.len()];
+    for (row, ti) in town_rows {
+        let t = &sim.towns[ti];
+        let (r, g, b) = if t.alive { town_col[ti] } else { (120, 126, 134) };
+        chips[row] = Some((r, g, b));
+    }
     for (i, l) in lines.iter().enumerate() {
+        if let Some((r, g, b)) = chips[i] {
+            ctx.set_fill_style_str(&format!("rgb({},{},{})", r, g, b));
+            ctx.fill_rect(10.0, 13.0 + i as f64 * 15.0, 10.0, 10.0);
+        }
         ctx.set_fill_style_str(if i == 2 { "rgb(255,222,120)" } else { "rgb(238,243,247)" });
-        let _ = ctx.fill_text(l, 10.0, 22.0 + i as f64 * 15.0);
+        let _ = ctx.fill_text(l, if chips[i].is_some() { 26.0 } else { 10.0 }, 22.0 + i as f64 * 15.0);
     }
 }
