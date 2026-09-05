@@ -4,6 +4,16 @@ pub const TICK_DT: f64 = 0.08;
 
 const FOOD_MAX: f32 = 10.0;
 const ORE_MAX: f32 = 60.0;
+const WATER_MAX: f32 = 240.0;
+const WATER_SUCK: f32 = 2.0;
+const WATER_REGEN_CLEAR: f32 = 12.0;
+const WATER_REGEN_RAIN: f32 = 70.0;
+const WATER_REGEN_HEAT: f32 = 4.0;
+const WATER_REGEN_FROST: f32 = 6.0;
+const RAIN_LAKE_CHANCE: u32 = 700;
+const METEOR_EVERY: u64 = 2400;
+const METEOR_CHANCE_P: u32 = 4000;
+const METEOR_RADIUS: i32 = 3;
 const SEEK_RADIUS: i32 = 26;
 const HOME_BOUND: f32 = 14.0;
 const HUNGRY_AT: f32 = 60.0;
@@ -245,6 +255,7 @@ pub struct Cell {
     pub terrain: Terrain,
     pub food: f32,
     pub ore: f32,
+    pub water: f32,
 }
 
 pub struct Agent {
@@ -394,7 +405,7 @@ impl Sim {
 
     fn make_terrain(rng: &mut u64) -> Vec<Cell> {
         let mut grid = vec![
-            Cell { terrain: Terrain::Grass, food: FOOD_MAX, ore: 0.0 };
+            Cell { terrain: Terrain::Grass, food: FOOD_MAX, ore: 0.0, water: 0.0 };
             W * H
         ];
         for cell in grid.iter_mut() {
@@ -466,6 +477,11 @@ impl Sim {
                 }
             }
             grid = next;
+        }
+        for c in grid.iter_mut() {
+            if c.terrain == Terrain::Water {
+                c.water = WATER_MAX;
+            }
         }
         grid
     }
@@ -1191,17 +1207,61 @@ impl Sim {
                 Weather::Frost => 1.5,
                 _ => 2.5,
             };
-            for cell in self.grid.iter_mut() {
-                match cell.terrain {
-                    Terrain::Forest => {
-                        cell.food = (cell.food + berry + if abundant { 1.0 } else { 0.0 }).min(FOOD_MAX)
+            let rain = self.weather == Weather::Rain;
+            let water_regen = match self.weather {
+                Weather::Rain => WATER_REGEN_RAIN,
+                Weather::Heat => WATER_REGEN_HEAT,
+                Weather::Frost => WATER_REGEN_FROST,
+                Weather::Clear => WATER_REGEN_CLEAR,
+            };
+            let dt = self.tick_count / REGROW_EVERY;
+            let mut new_lakes: Vec<(i32, i32)> = Vec::new();
+            for y in 0..H {
+                for x in 0..W {
+                    let i = idx(x as i32, y as i32);
+                    match self.grid[i].terrain {
+                        Terrain::Forest => {
+                            let k = (self.grid[i].food / FOOD_MAX).max(0.85);
+                            let ber = berry * k + if abundant { 1.0 } else { 0.0 };
+                            self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
+                        }
+                        Terrain::Farm => {
+                            let cr = crop + if abundant { 1.0 } else { 0.0 };
+                            self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
+                        }
+                        Terrain::Water => {
+                            self.grid[i].water = (self.grid[i].water + water_regen).min(WATER_MAX);
+                            if rain
+                                && self.grid[i].water >= WATER_MAX * 0.85
+                                && self.brain(x as i32, y as i32, dt) % 9000 < RAIN_LAKE_CHANCE
+                                && new_lakes.len() < 4
+                            {
+                                let h = self.brain(x as i32, y as i32, dt + 1);
+                                let n = (h >> 3) % 4;
+                                let (dx, dy) = match n {
+                                    0 => (1, 0),
+                                    1 => (-1, 0),
+                                    2 => (0, 1),
+                                    _ => (0, -1),
+                                };
+                                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                                if in_bounds(nx, ny)
+                                    && self.grid[idx(nx, ny)].terrain == Terrain::Grass
+                                {
+                                    new_lakes.push((nx, ny));
+                                }
+                            }
+                        }
+                        Terrain::Hills | Terrain::Grass => {}
                     }
-                    Terrain::Farm => {
-                        cell.food = (cell.food + crop + if abundant { 1.0 } else { 0.0 }).min(FARM_FOOD_MAX)
-                    }
-                    Terrain::Hills => cell.ore = (cell.ore + 0.5).min(ORE_MAX),
-                    _ => {}
                 }
+            }
+            for (x, y) in new_lakes {
+                let c = &mut self.grid[idx(x, y)];
+                c.terrain = Terrain::Water;
+                c.food = 0.0;
+                c.ore = 0.0;
+                c.water = WATER_MAX;
             }
         }
 
@@ -1289,6 +1349,9 @@ impl Sim {
         self.war_step();
         if self.tick_count % TOWNS_EVERY == 0 {
             self.town_lifecycle();
+        }
+        if self.tick_count % METEOR_EVERY == 0 {
+            self.meteor_step();
         }
     }
 
@@ -1800,8 +1863,24 @@ impl Sim {
 
     fn water_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
         self.seek(x, y, |s, nx, ny| {
-            s.grid[idx(nx, ny)].terrain.walkable() && s.is_water_adj(nx, ny)
+            s.grid[idx(nx, ny)].terrain.walkable() && s.water_adj_level(nx, ny)
         })
+    }
+
+    fn water_adj_level(&self, x: i32, y: i32) -> bool {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let wx = x + dx;
+                let wy = y + dy;
+                if !in_bounds(wx, wy) {
+                    continue;
+                }
+                if self.grid[idx(wx, wy)].terrain == Terrain::Water && self.grid[idx(wx, wy)].water > 0.5 {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn ore_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
@@ -1970,8 +2049,30 @@ impl Sim {
                                 }
                             }
                             ResourceKind::Water => {
-                                if wadj && self.grid[idx(nx, ny)].terrain.walkable() {
-                                    a.carry = Some((ResourceKind::Water, 2.0));
+                                if wadj {
+                                    let mut sucked = 0.0;
+                                    'neigh: for dy in -1..=1 {
+                                        for dx in -1..=1 {
+                                            if dx == 0 && dy == 0 {
+                                                continue;
+                                            }
+                                            let wx = nx + dx;
+                                            let wy = ny + dy;
+                                            if !in_bounds(wx, wy) {
+                                                continue;
+                                            }
+                                            if self.grid[idx(wx, wy)].terrain == Terrain::Water {
+                                                let wcell = &mut self.grid[idx(wx, wy)];
+                                                let give = wcell.water.min(WATER_SUCK);
+                                                wcell.water = (wcell.water - give).max(0.0);
+                                                sucked += give;
+                                                break 'neigh;
+                                            }
+                                        }
+                                    }
+                                    if sucked >= WATER_SUCK * 0.5 {
+                                        a.carry = Some((ResourceKind::Water, 2.0));
+                                    }
                                 }
                             }
                             ResourceKind::Ore => {
@@ -2420,6 +2521,44 @@ impl Sim {
             }
         }
         self.caravans.retain(|c| c.home != ti && c.target != ti);
+    }
+
+    fn meteor_step(&mut self) {
+        let epoch = self.tick_count / METEOR_EVERY;
+        for y in 0..H {
+            for x in 0..W {
+                let i = idx(x as i32, y as i32);
+                if self.grid[i].terrain != Terrain::Grass {
+                    continue;
+                }
+                if self.brain(x as i32, y as i32, epoch) % METEOR_CHANCE_P == 0 {
+                    self.meteor_strike(x as i32, y as i32);
+                    return;
+                }
+            }
+        }
+    }
+
+    fn meteor_strike(&mut self, cx: i32, cy: i32) {
+        for dy in -METEOR_RADIUS..=METEOR_RADIUS {
+            for dx in -METEOR_RADIUS..=METEOR_RADIUS {
+                let x = cx + dx;
+                let y = cy + dy;
+                if !in_bounds(x, y) {
+                    continue;
+                }
+                let i = idx(x, y);
+                if dx.abs() <= 1 && dy.abs() <= 1 {
+                    self.grid[i].terrain = Terrain::Hills;
+                    self.grid[i].ore = ORE_MAX;
+                    self.grid[i].food = 0.0;
+                    self.grid[i].water = 0.0;
+                } else {
+                    self.grid[i].terrain = Terrain::Grass;
+                    self.grid[i].food = 0.0;
+                }
+            }
+        }
     }
 
     fn war_step(&mut self) {
@@ -3245,6 +3384,177 @@ mod tests {
         let cost_blessed = 100.0 - s.towns[1].stocks.food;
         assert!(cost_plain > 0.0 && cost_blessed > 0.0 && cost_blessed < cost_plain,
             "prosperity should cheapen birth (blessed {} < plain {})", cost_blessed, cost_plain);
+    }
+
+    fn count_water(s: &Sim) -> usize {
+        s.grid.iter().filter(|c| c.terrain == Terrain::Water).count()
+    }
+
+    fn lake_volume(s: &Sim) -> f32 {
+        s.grid.iter().filter(|c| c.terrain == Terrain::Water).map(|c| c.water).sum()
+    }
+
+    #[test]
+    fn forest_regrows_slower_when_picked() {
+        let mut s = Sim::new(12341);
+        s.agents.clear();
+        while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+            s.tick();
+        }
+        s.weather = Weather::Clear;
+        s.weather_left = 100000.0;
+        let mut forests = Vec::new();
+        for y in 0..H {
+            for x in 0..W {
+                if s.grid[idx(x as i32, y as i32)].terrain == Terrain::Forest {
+                    forests.push((x as i32, y as i32));
+                    if forests.len() == 2 {
+                        break;
+                    }
+                }
+            }
+            if forests.len() == 2 {
+                break;
+            }
+        }
+        assert_eq!(forests.len(), 2);
+        let (fx1, fy1) = forests[0];
+        let (fx2, fy2) = forests[1];
+        s.grid[idx(fx1, fy1)].food = 2.0;
+        s.grid[idx(fx2, fy2)].food = FOOD_MAX - 1.0;
+        s.tick();
+        let g1 = s.grid[idx(fx1, fy1)].food - 2.0;
+        let g2 = s.grid[idx(fx2, fy2)].food - (FOOD_MAX - 1.0);
+        assert!(g1 > 0.0, "picked forest should still regrow a little");
+        assert!(g1 < g2, "picked forest regrows slower than a lush one ({} < {})", g1, g2);
+    }
+
+    #[test]
+    fn water_is_finite_and_refills_in_rain() {
+        let mut s = Sim::new(88123);
+        s.agents.clear();
+        let (wx, wy) = {
+            let mut spot = None;
+            for y in 0..H {
+                for x in 0..W {
+                    if s.grid[idx(x as i32, y as i32)].terrain == Terrain::Water {
+                        spot = Some((x as i32, y as i32));
+                        break;
+                    }
+                }
+                if spot.is_some() {
+                    break;
+                }
+            }
+            spot.unwrap()
+        };
+        let shore = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .map(|(dx, dy)| (wx + dx, wy + dy))
+            .find(|(x, y)| in_bounds(*x, *y) && s.grid[idx(*x, *y)].terrain == Terrain::Grass)
+            .expect("lake shore");
+        let vol_before = lake_volume(&s);
+        let a = Agent {
+            home: 0,
+            x: shore.0,
+            y: shore.1,
+            dir_x: 1,
+            dir_y: 0,
+            hunger: 50.0,
+            thirst: 90.0,
+            energy: 100.0,
+            want: ResourceKind::Water,
+            carry: None,
+            family: 0,
+            founder: false,
+            raider: false,
+            target_town: None,
+            role: Role::Worker,
+            sick: 0,
+            age: 5000,
+        };
+        s.agents.push(a);
+        s.tick();
+        let vol_after = lake_volume(&s);
+        assert!(
+            (vol_before - vol_after - 2.0).abs() < 0.01,
+            "collecting water should drain 2 units of lake (before {:.1} after {:.1})",
+            vol_before,
+            vol_after
+        );
+
+        s.weather = Weather::Rain;
+        s.weather_left = 100000.0;
+        while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+            s.tick();
+        }
+        let before = lake_volume(&s);
+        s.tick();
+        let after = lake_volume(&s);
+        assert!(
+            after > before + 10.0,
+            "rain should refill lakes at regrow ({} -> {})",
+            before,
+            after
+        );
+    }
+
+    #[test]
+    fn rain_forms_new_lakes() {
+        for seed in 1..80u64 {
+            let mut s = Sim::new(seed);
+            s.agents.clear();
+            while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+                s.tick();
+            }
+            let before = count_water(&s);
+            s.weather = Weather::Rain;
+            s.weather_left = 100000.0;
+            s.tick();
+            let after = count_water(&s);
+            if after > before {
+                assert!(after > before, "rain should create new lake cells");
+                return;
+            }
+        }
+        panic!("no seed produced a rain lake within 80 tries");
+    }
+
+    #[test]
+    fn meteor_creates_ore_without_rng() {
+        for seed in 1..10u64 {
+            let mut s = Sim::new(seed);
+            s.agents.clear();
+            while s.tick_count % METEOR_EVERY != METEOR_EVERY - 1 {
+                s.tick();
+            }
+            s.tick();
+            let struck = s
+                .grid
+                .iter()
+                .any(|c| c.terrain == Terrain::Hills && c.ore >= ORE_MAX - 0.01);
+            if !struck {
+                continue;
+            }
+            assert!(struck, "meteorite should turn craters into ore hills");
+            for c in s.grid.iter_mut() {
+                if c.terrain == Terrain::Hills {
+                    c.ore = 0.0;
+                }
+            }
+            for _ in 0..1000 {
+                s.tick();
+            }
+            let leftover: f32 = s
+                .grid
+                .iter()
+                .filter(|c| c.terrain == Terrain::Hills)
+                .map(|c| c.ore)
+                .sum();
+            assert!(leftover < 0.01, "hills ore must not regrow on its own ({} left)", leftover);
+            return;
+        }
+        panic!("no seed produced a meteorite within 10 tries");
     }
 
     #[test]
