@@ -14,6 +14,9 @@ const RAIN_LAKE_CHANCE: u32 = 700;
 const METEOR_EVERY: u64 = 2400;
 const METEOR_CHANCE_P: u32 = 4000;
 const METEOR_RADIUS: i32 = 3;
+const MIGRATE_EVERY: u64 = 500;
+const MIGRATE_CHANCE_P: u32 = 6;
+const MIGRATE_QUALITY_MARGIN: f32 = 5.0;
 const SEEK_RADIUS: i32 = 26;
 const HOME_BOUND: f32 = 14.0;
 const HUNGRY_AT: f32 = 60.0;
@@ -355,6 +358,7 @@ pub struct Sim {
     pub empires: Vec<Empire>,
     pub animals: Vec<Animal>,
     pub caravans: Vec<Caravan>,
+    pub migrations: u32,
     pub tick_count: u64,
     pub weather: Weather,
     pub weather_left: f64,
@@ -392,6 +396,7 @@ impl Sim {
             empires: Vec::new(),
             animals: Vec::new(),
             caravans: Vec::new(),
+            migrations: 0,
             tick_count: 0,
             weather: Weather::Clear,
             weather_left: 0.0,
@@ -1347,6 +1352,9 @@ impl Sim {
             self.empire_step();
         }
         self.war_step();
+        if self.tick_count % MIGRATE_EVERY == 0 {
+            self.migration_step();
+        }
         if self.tick_count % TOWNS_EVERY == 0 {
             self.town_lifecycle();
         }
@@ -2558,6 +2566,84 @@ impl Sim {
                     self.grid[i].food = 0.0;
                 }
             }
+        }
+    }
+
+    fn town_quality(&self, ti: usize) -> f32 {
+        let t = &self.towns[ti];
+        t.stocks.food + t.stocks.water * 0.7 - (self.pop(ti) as f32 / t.cap.max(1) as f32) * 40.0
+    }
+
+    fn migration_step(&mut self) {
+        let epoch = self.tick_count / MIGRATE_EVERY;
+        let mut moves: Vec<(usize, usize, i32, i32)> = Vec::new();
+        let town_count = self.towns.len();
+        for i in 0..self.agents.len() {
+            let a = &self.agents[i];
+            if a.age < CHILD_AGE || a.sick > 0 || a.raider || a.carry.is_some() {
+                continue;
+            }
+            if a.hunger < HUNGRY_AT || a.thirst < THIRSTY_AT {
+                continue;
+            }
+            let hx = a.x;
+            let hy = a.y;
+            if self.brain(hx, hy, epoch) % MIGRATE_CHANCE_P != 0 {
+                continue;
+            }
+            let home = a.home;
+            if home >= town_count || !self.towns[home].alive {
+                continue;
+            }
+            let home_q = self.town_quality(home);
+            let mut best = None;
+            for ti in 0..town_count {
+                if ti == home || !self.towns[ti].alive {
+                    continue;
+                }
+                if self.towns[home].at_war && self.towns[home].enemy == Some(ti) {
+                    continue;
+                }
+                if self.towns[ti].at_war && self.towns[ti].enemy == Some(home) {
+                    continue;
+                }
+                let q = self.town_quality(ti);
+                if best.map(|(_, bq)| q > bq).unwrap_or(true) {
+                    best = Some((ti, q));
+                }
+            }
+            if let Some((ti, q)) = best {
+                if q > home_q + MIGRATE_QUALITY_MARGIN {
+                    let h = self.brain(hx, hy, epoch.wrapping_mul(7) + ti as u64);
+                    let tx = self.towns[ti].x;
+                    let ty = self.towns[ti].y;
+                    let ang = (h % 360) as f64 * std::f64::consts::PI / 180.0;
+                    let r: i32 = 6 + ((h >> 8) % 36) as i32;
+                    let mut nx = tx + (ang.cos() * r as f64) as i32;
+                    let mut ny = ty + (ang.sin() * r as f64) as i32;
+                    let mut tries = 0;
+                    while tries < 12 {
+                        if in_bounds(nx, ny)
+                            && self.grid[idx(nx, ny)].terrain.walkable()
+                            && self.grid[idx(nx, ny)].terrain != Terrain::Water
+                        {
+                            break;
+                        }
+                        tries += 1;
+                        nx = tx + (r / 2 - (tries as i32 % r));
+                        ny = ty + (tries as i32 % (r / 2 + 1));
+                    }
+                    if tries < 12 && in_bounds(nx, ny) {
+                        moves.push((i, ti, nx, ny));
+                    }
+                }
+            }
+        }
+        for (i, ti, nx, ny) in moves {
+            self.agents[i].home = ti;
+            self.agents[i].x = nx;
+            self.agents[i].y = ny;
+            self.migrations = self.migrations.wrapping_add(1);
         }
     }
 
@@ -4231,5 +4317,111 @@ mod tests {
             s.towns[0].stocks.gold < 200.0,
             "buying should spend gold"
         );
+    }
+
+    fn build_migration_world(seed: u64) -> Sim {
+        let mut s = Sim::new(seed);
+        s.towns[0].stocks.food = 60.0;
+        s.towns[0].stocks.water = 40.0;
+        for t in s.towns.iter_mut().skip(1) {
+            t.stocks.food = 600.0;
+            t.stocks.water = 400.0;
+        }
+        s.agents.clear();
+        s
+    }
+
+    fn migration_agent(home: usize, x: i32, y: i32, age: u32, sick: u32) -> Agent {
+        Agent {
+            home,
+            x,
+            y,
+            dir_x: 1,
+            dir_y: 0,
+            hunger: 80.0,
+            thirst: 80.0,
+            energy: 100.0,
+            want: ResourceKind::Food,
+            carry: None,
+            family: 0,
+            founder: false,
+            raider: false,
+            target_town: None,
+            role: Role::Worker,
+            sick,
+            age,
+        }
+    }
+
+#[test]
+fn migration_relocates_adults_to_better_town() {
+        for seed in 1..60u64 {
+            let mut s = build_migration_world(seed);
+            let (cx, cy) = (s.towns[0].x, s.towns[0].y);
+            let adult = migration_agent(0, cx + 2 + (seed % 5) as i32, cy + (seed % 3) as i32, 5000, 0);
+            let child = migration_agent(0, cx + 4, cy, 10, 0);
+            let sick = migration_agent(0, cx + 6, cy, 5000, 5);
+            s.agents.push(adult);
+            s.agents.push(child);
+            s.agents.push(sick);
+            s.tick_count = MIGRATE_EVERY - 1;
+            s.migration_step();
+            if s.agents[0].home != 0 {
+                assert_eq!(s.agents[0].home, 1, "adult should migrate to the richer town");
+                assert_eq!(s.agents[1].home, 0, "children must not migrate");
+                assert_eq!(s.agents[2].home, 0, "sick agents must not migrate");
+                let (mx, my) = (s.agents[0].x, s.agents[0].y);
+                let (tx, ty) = (s.towns[1].x, s.towns[1].y);
+                assert!(in_bounds(mx, my), "migrant must land in bounds");
+                let t = &s.grid[idx(mx, my)];
+                assert!(t.terrain.walkable() && t.terrain != Terrain::Water, "migrant must land on land");
+                let d = (mx - tx).abs().max((my - ty).abs());
+                assert!(d <= 42, "migrant should land near its new town ({} away)", d);
+                let qsrc = s.town_quality(0);
+                let qdst = s.town_quality(1);
+                assert!(qdst >= qsrc - 0.5, "migration must move to a better town");
+                return;
+            }
+        }
+        panic!("no seed made an adult migrate");
+    }
+
+    #[test]
+    fn migration_is_deterministic_and_happens() {
+        for seed in 1..20u64 {
+            let mut s1 = build_migration_world(seed);
+            let mut s2 = build_migration_world(seed);
+            let (cx, cy) = (s1.towns[0].x, s1.towns[0].y);
+            for k in 0..3i32 {
+                let a1 = migration_agent(0, cx + 2 + k * 3, cy + (seed % 2) as i32, 5000, 0);
+                let a2 = migration_agent(0, cx + 2 + k * 3, cy + (seed % 2) as i32, 5000, 0);
+                s1.agents.push(a1);
+                s2.agents.push(a2);
+            }
+            let mut moved = 0;
+            for _ in 0..4 {
+                while s1.tick_count % MIGRATE_EVERY != MIGRATE_EVERY - 1 {
+                    s1.tick();
+                    s2.tick();
+                }
+                let before: Vec<usize> = s1.agents.iter().map(|a| a.home).collect();
+                s1.tick();
+                s2.tick();
+                for i in 0..before.len().min(s1.agents.len()) {
+                    if before[i] != s1.agents[i].home {
+                        moved += 1;
+                    }
+                }
+            }
+            if moved > 0 {
+                let homes1: Vec<(usize, i32, i32)> =
+                    s1.agents.iter().map(|a| (a.home, a.x, a.y)).collect();
+                let homes2: Vec<(usize, i32, i32)> =
+                    s2.agents.iter().map(|a| (a.home, a.x, a.y)).collect();
+                assert_eq!(homes1, homes2, "migration must be deterministic");
+                return;
+            }
+        }
+        panic!("no seed produced a migration over 4 windows");
     }
 }

@@ -826,7 +826,7 @@ for a in &sim.animals {
             .filter(|a| a.species == Species::Cow && a.home.is_some())
             .count()
     ));
-    lines.push(format!("dynasties {}  extinct {}  ideas {}  wars {}  ruins {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count(), sim.towns.iter().filter(|t| !t.alive).count()));
+    lines.push(format!("dynasties {}  extinct {}  ideas {}  wars {}  ruins {}  migrants {}", dynasty, extinct, ideas, sim.towns.iter().filter(|t| t.at_war).count(), sim.towns.iter().filter(|t| !t.alive).count(), sim.migrations));
     let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
     let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
     lines.push(format!("gold {}  caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
