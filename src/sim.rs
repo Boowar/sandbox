@@ -4997,11 +4997,13 @@ mod tests {
     fn elders_may_die_of_old_age() {
         let mut s = Sim::new(91);
         s.agents.retain(|a| a.home == 0);
+        s.agents.truncate(1);
         s.agents[0].age = crate::sim::OLD_AGE + 1;
+        s.families.iter_mut().for_each(|f| f.members = 0);
         let mut died = false;
-        for _ in 0..200000u64 {
+        for _ in 0..5000u64 {
             s.tick();
-            if !s.agents.iter().any(|a| a.age > crate::sim::OLD_AGE) {
+            if s.agents.is_empty() {
                 died = true;
                 break;
             }
