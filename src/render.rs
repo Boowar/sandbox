@@ -798,6 +798,17 @@ for a in &sim.animals {
     }
 
     for c in &sim.caravans {
+        let tx = sim.towns[c.target].x as f64 * CELL + 4.0;
+        let ty = sim.towns[c.target].y as f64 * CELL + 4.0;
+        let cx = c.x as f64 * CELL + 4.0;
+        let cy = c.y as f64 * CELL + 4.0;
+        ctx.set_stroke_style_str("rgba(232,214,120,0.25)");
+        ctx.set_line_width(0.5);
+        ctx.begin_path();
+        ctx.move_to(cx, cy);
+        ctx.line_to(tx, ty);
+        ctx.stroke();
+        ctx.set_line_width(1.0);
         draw_caravan(&ctx, c.x as f64 * CELL, c.y as f64 * CELL);
     }
 
@@ -1251,6 +1262,25 @@ for a in &sim.animals {
             }
             if !war_mark.is_empty() {
                 p.push(war_mark);
+            }
+            let town_caravans: Vec<_> = sim.caravans.iter().filter(|c| c.home == si || c.target == si).collect();
+            if !town_caravans.is_empty() {
+                let routes: Vec<String> = town_caravans.iter().map(|c| {
+                    let other = if c.home == si { c.target } else { c.home };
+                    let name = sim.families.iter().filter(|f| f.town == other && !f.extinct)
+                        .max_by_key(|f| f.members).map(|f| f.name.as_str()).unwrap_or("?");
+                    let arrow = if c.home == si { "→" } else { "←" };
+                    let res: Vec<&str> = c.goods.iter().map(|(k, _)| match k {
+                        crate::sim::ResourceKind::Food => "🌾",
+                        crate::sim::ResourceKind::Water => "💧",
+                        crate::sim::ResourceKind::Ore => "⛏",
+                        crate::sim::ResourceKind::Meat => "🥩",
+                        crate::sim::ResourceKind::Gold => "💰",
+                        crate::sim::ResourceKind::Fish => "🐟",
+                    }).collect();
+                    format!("{}{}{}", arrow, name, res.join(""))
+                }).collect();
+                p.push(format!("🐫 {}", routes.join("  ")));
             }
             p.push(format!("📚 science {:.1}", t.dev));
             if !t.alive {
