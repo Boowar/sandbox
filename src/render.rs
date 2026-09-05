@@ -489,6 +489,7 @@ pub fn draw(
     cam_x: f64,
     cam_y: f64,
     build_flash: Option<(usize, f64)>,
+    selected_town: Option<usize>,
 ) {
     let cw = W as f64 * CELL;
     let ch = H as f64 * CELL;
@@ -631,6 +632,19 @@ pub fn draw(
                 ctx.set_fill_style_str("rgb(215,225,236)");
                 let _ = ctx.fill_text(&rul.name, t.x as f64 * CELL - 16.0, t.y as f64 * CELL + 8.0);
             }
+        }
+    }
+
+    if let Some(si) = selected_town {
+        if let Some(t) = sim.towns.get(si) {
+            let pulse = 0.5 + 0.5 * ((tick as f64) * 0.15).sin();
+            let alpha = 0.4 + pulse * 0.4;
+            ctx.set_stroke_style_str(&format!("rgba(255,255,100,{:.2})", alpha));
+            ctx.set_line_width(2.0 / zoom);
+            ctx.begin_path();
+            ctx.arc(t.x as f64 * CELL + 4.0, t.y as f64 * CELL + 4.0, 14.0, 0.0, std::f64::consts::TAU).ok();
+            ctx.stroke();
+            ctx.set_line_width(1.0);
         }
     }
 
@@ -1018,5 +1032,154 @@ for a in &sim.animals {
         }
         ctx.set_fill_style_str(if i == 2 { "rgb(255,222,120)" } else { "rgb(238,243,247)" });
         let _ = ctx.fill_text(l, if chips[i].is_some() { 26.0 } else { 10.0 }, 22.0 + i as f64 * 15.0);
+    }
+
+    if let Some(si) = selected_town {
+        if let Some(t) = sim.towns.get(si) {
+            let ruler = sim.families.iter()
+                .filter(|f| f.town == si && !f.extinct)
+                .max_by_key(|f| f.members)
+                .map(|f| f.name.as_str())
+                .filter(|n| !n.is_empty())
+                .unwrap_or("?");
+            let pop = sim.pop(si);
+            let (cr, cg, cb) = town_col[si];
+            let agents: Vec<_> = sim.agents.iter().filter(|a| a.home == si).collect();
+            let sick_n = agents.iter().filter(|a| a.sick > 0).count();
+            let avg_mood: f32 = if agents.is_empty() { 0.0 } else {
+                agents.iter().map(|a| a.mood).sum::<f32>() / agents.len() as f32
+            };
+            let mut role_counts = [(Role::Worker, 0u32), (Role::Farmer, 0u32), (Role::Miner, 0u32),
+                (Role::Hunter, 0u32), (Role::Builder, 0u32), (Role::Healer, 0u32),
+                (Role::Priest, 0u32), (Role::Scholar, 0u32), (Role::Guard, 0u32)];
+            for a in &agents {
+                for (r, c) in role_counts.iter_mut() {
+                    if a.role == *r { *c += 1; }
+                }
+            }
+            let build_counts = |kind: crate::sim::BuildingKind| -> usize {
+                t.built.iter().filter(|b| **b == kind).count()
+            };
+            let houses = build_counts(crate::sim::BuildingKind::House);
+            let wells = build_counts(crate::sim::BuildingKind::Well);
+            let farms = build_counts(crate::sim::BuildingKind::Farm);
+            let posts = build_counts(crate::sim::BuildingKind::TradePost);
+            let sanct = build_counts(crate::sim::BuildingKind::Sanctuary);
+            let clinic = build_counts(crate::sim::BuildingKind::Clinic);
+            let wall = build_counts(crate::sim::BuildingKind::Wall);
+            let barracks = build_counts(crate::sim::BuildingKind::Barracks);
+            let uni = build_counts(crate::sim::BuildingKind::University);
+            let smith = build_counts(crate::sim::BuildingKind::Smithy);
+            let lib = build_counts(crate::sim::BuildingKind::Library);
+            let bless_name = match t.blessing {
+                crate::sim::Blessing::Fertility => "плодородие",
+                crate::sim::Blessing::Abundance => "изобилие",
+                crate::sim::Blessing::Protection => "защита",
+                crate::sim::Blessing::None => "",
+            };
+            let idea_name = match t.idea {
+                crate::sim::TownIdea::War => "война",
+                crate::sim::TownIdea::Prosperity => "процветание",
+                crate::sim::TownIdea::Toil => "труд",
+                crate::sim::TownIdea::None => "",
+            };
+            let emp_name = t.empire.and_then(|e| sim.empires.get(e)).map(|emp| emp.name.as_str()).unwrap_or("");
+            let war_mark = if t.at_war {
+                let enemy_name = t.enemy.and_then(|ei| sim.towns.get(ei))
+                    .and_then(|_| sim.families.iter().filter(|f| f.town == t.enemy.unwrap() && !f.extinct)
+                        .max_by_key(|f| f.members).map(|f| f.name.as_str()))
+                    .unwrap_or("?");
+                format!("  ⚔ vs {}", enemy_name)
+            } else { String::new() };
+            let queue_str = if t.queue.is_empty() { String::new() } else {
+                t.queue.iter().map(|(k, _)| match k {
+                    crate::sim::BuildingKind::House => "🏠", crate::sim::BuildingKind::Well => "⛲",
+                    crate::sim::BuildingKind::TradePost => "🏦", crate::sim::BuildingKind::Farm => "🌾",
+                    crate::sim::BuildingKind::Sanctuary => "⛪", crate::sim::BuildingKind::Clinic => "⛑",
+                    crate::sim::BuildingKind::Wall => "⛋", crate::sim::BuildingKind::Barracks => "⛩",
+                    crate::sim::BuildingKind::University => "🎓", crate::sim::BuildingKind::Smithy => "🔨",
+                    crate::sim::BuildingKind::Library => "📚",
+                }).collect::<Vec<_>>().join("")
+            };
+            let families: Vec<_> = sim.families.iter()
+                .filter(|f| f.town == si && !f.extinct)
+                .collect();
+
+            let mut p: Vec<String> = Vec::new();
+            p.push(format!("═══ {} ═══", ruler));
+            p.push(format!("pop {} / {}  |  mood {:.2}{}", pop, t.cap, avg_mood,
+                if sick_n > 0 { format!("  sick {}", sick_n) } else { String::new() }));
+            p.push(String::new());
+            p.push(format!(" еда {:>5.0}  вода {:>5.0}  руда {:>5.0}", t.stocks.food, t.stocks.water, t.stocks.ore));
+            p.push(format!(" мясо {:>5.0}  золото {:>5.0}", t.stocks.meat, t.stocks.gold));
+            p.push(String::new());
+            p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛪{} ⛑{}", houses, wells, farms, posts, sanct, clinic));
+            p.push(format!("⛋{} ⛩{} 🎓{} 🔨{} 📚{}", wall, barracks, uni, smith, lib));
+            if !t.queue.is_empty() {
+                p.push(format!("  build: {} ({:.0}%)", queue_str, t.queue[0].1 * 100.0));
+            }
+            p.push(String::new());
+            for (r, c) in &role_counts {
+                if *c > 0 {
+                    let icon = match r {
+                        Role::Worker => "⚙", Role::Farmer => "🌱", Role::Miner => "⛏",
+                        Role::Hunter => "🏹", Role::Builder => "🔨", Role::Healer => "💚",
+                        Role::Priest => "🙏", Role::Scholar => "🎓", Role::Guard => "⚔",
+                    };
+                    p.push(format!(" {} {}×{}", icon, format!("{:?}", r), c));
+                }
+            }
+            p.push(String::new());
+            if !families.is_empty() {
+                let fam_str = families.iter().map(|f| {
+                    format!("{} ({}{}, {}{})", f.name, f.members, if f.children > 0 { format!("+{}", f.children) } else { String::new() },
+                        if f.role != Role::Worker { format!("{:?}", f.role) } else { String::new() },
+                        "")
+                }).collect::<Vec<_>>().join("  ");
+                p.push(format!("династии: {}", fam_str));
+            }
+            if !emp_name.is_empty() {
+                p.push(format!("империя: {}", emp_name));
+            }
+            if !idea_name.is_empty() {
+                p.push(format!("идея: {}  ({:.0} тиков)", idea_name, t.idea_left));
+            }
+            if !bless_name.is_empty() {
+                p.push(format!("благословение: {}  ({:.0} тиков)", bless_name, t.blessing_left));
+            }
+            if t.plague_until > 0 {
+                p.push("☠ ЧУМА!".to_string());
+            }
+            if t.faith > 0.0 {
+                p.push(format!("вера: {:.0}", t.faith));
+            }
+            if !war_mark.is_empty() {
+                p.push(war_mark);
+            }
+            p.push(format!("наука: {:.1}", t.dev));
+            if !t.alive {
+                p.push("☠ РАЗОРЁН".to_string());
+            }
+
+            let pw = 220.0;
+            let ph = 14.0 + p.len() as f64 * 15.0;
+            let px = 4.0;
+            let py = 4.0 + 14.0 + lines.len() as f64 * 15.0 + 8.0;
+            ctx.set_fill_style_str("rgba(10,14,18,0.88)");
+            ctx.fill_rect(px, py, pw, ph);
+            ctx.set_stroke_style_str(&format!("rgb({},{},{})", cr, cg, cb));
+            ctx.begin_path();
+            ctx.rect(px, py, pw, ph);
+            ctx.stroke();
+            ctx.set_font("13px ui-monospace, monospace");
+            for (i, l) in p.iter().enumerate() {
+                if i == 0 {
+                    ctx.set_fill_style_str(&format!("rgb({},{},{})", cr, cg, cb));
+                } else {
+                    ctx.set_fill_style_str("rgb(238,243,247)");
+                }
+                let _ = ctx.fill_text(l, px + 8.0, py + 14.0 + i as f64 * 15.0);
+            }
+        }
     }
 }

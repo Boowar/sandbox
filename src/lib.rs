@@ -56,6 +56,7 @@ struct App {
     pinch_prev_my: f64,
     build_cursor: usize,
     build_flash: Option<(usize, f64)>,
+    selected_town: Option<usize>,
 }
 
 impl App {
@@ -144,6 +145,7 @@ impl App {
             self.cam_x,
             self.cam_y,
             self.build_flash,
+            self.selected_town,
         );
     }
 
@@ -449,14 +451,36 @@ impl App {
         }
     }
 
+    fn select_town_at(&mut self, client_x: i32, client_y: i32) {
+        if self.bless_mode || self.inspire_mode || self.build_mode {
+            return;
+        }
+        if let Some((gx, gy)) = self.to_grid(client_x as f64, client_y as f64) {
+            let mut best = None;
+            let mut bd = 6;
+            for (ti, t) in self.sim.borrow().towns.iter().enumerate() {
+                let d = ((t.x as i32 - gx as i32).abs()).max((t.y as i32 - gy as i32).abs());
+                if d < bd {
+                    bd = d;
+                    best = Some(ti);
+                }
+            }
+            self.selected_town = if self.selected_town == best { None } else { best };
+        } else {
+            self.selected_town = None;
+        }
+    }
+
     fn build(&mut self, kind: sim::BuildingKind) {
         let n = self.sim.borrow().towns.len();
         if n == 0 {
             return;
         }
-        let ti = self.build_cursor % n;
+        let ti = self.selected_town.unwrap_or_else(|| self.build_cursor % n);
         self.sim.borrow_mut().build_request(ti, kind);
-        self.build_cursor += 1;
+        if self.selected_town.is_none() {
+            self.build_cursor += 1;
+        }
         self.build_flash = Some((ti, 1.0));
     }
 
@@ -465,7 +489,7 @@ impl App {
         if n == 0 {
             return;
         }
-        let ti = self.build_cursor % n;
+        let ti = self.selected_town.unwrap_or_else(|| self.build_cursor % n);
         let (x, y) = {
             let s = self.sim.borrow();
             (s.towns[ti].x, s.towns[ti].y)
@@ -591,6 +615,7 @@ pub fn start() -> Result<(), JsValue> {
         pinch_prev_my: 0.0,
         build_cursor: 0,
         build_flash: None,
+        selected_town: None,
     }));
     app.borrow().sync_ui();
 
@@ -621,6 +646,8 @@ pub fn start() -> Result<(), JsValue> {
                     app.inspire_at(e.client_x(), e.client_y());
                 } else if app.build_mode {
                     app.build_terrain_at(e.client_x(), e.client_y());
+                } else {
+                    app.select_town_at(e.client_x(), e.client_y());
                 }
             } else {
                 app.drag_ptr = None;
