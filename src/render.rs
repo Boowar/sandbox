@@ -973,6 +973,7 @@ for a in &sim.animals {
         count_building(sim, crate::sim::BuildingKind::Barracks),
     );
     let temples = count_building(sim, crate::sim::BuildingKind::Temple);
+    let warehouses = count_building(sim, crate::sim::BuildingKind::Warehouse);
     let science: f32 = sim.towns.iter().map(|t| t.dev).sum();
     let scholars: usize = sim.agents.iter().filter(|a| a.role == Role::Scholar).count();
     let builders: usize = sim.agents.iter().filter(|a| a.role == Role::Builder).count();
@@ -1013,7 +1014,7 @@ for a in &sim.animals {
     line_colors.push(None);
 
     if hud.show_buildings {
-        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{} 🛕{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, temples, pending));
+        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{} 🛕{} 📦{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, temples, warehouses, pending));
         line_colors.push(None);
     }
 
