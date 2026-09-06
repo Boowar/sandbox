@@ -625,6 +625,46 @@ pub fn draw(
     ctx.set_image_smoothing_enabled(false);
     let _ = ctx.draw_image_with_html_canvas_element(terrain, 0.0, 0.0);
 
+    let town_col: Vec<(u8, u8, u8)> = sim
+        .towns
+        .iter()
+        .map(|t| {
+            t.empire
+                .and_then(|e| sim.empires.get(e))
+                .map(|emp| (emp.r, emp.g, emp.b))
+                .unwrap_or((t.r, t.g, t.b))
+        })
+        .collect();
+
+    for (i, t) in sim.towns.iter().enumerate() {
+        if !t.alive { continue; }
+        let (cr, cg, cb) = town_col[i];
+        ctx.set_fill_style_str(&format!("rgba({},{},{},0.12)", cr, cg, cb));
+        for y in 0..H {
+            for x in 0..W {
+                if sim.territory[y * W + x] == i as i8 {
+                    ctx.fill_rect(x as f64 * CELL, y as f64 * CELL, CELL, CELL);
+                }
+            }
+        }
+    }
+    ctx.set_stroke_style_str("rgba(255,255,255,0.25)");
+    ctx.set_line_width(0.5);
+    for y in 0..H {
+        for x in 0..W {
+            let ti = sim.territory[y * W + x];
+            if ti < 0 { continue; }
+            let ox = x as f64 * CELL;
+            let oy = y as f64 * CELL;
+            if x + 1 < W && sim.territory[y * W + x + 1] != ti {
+                ctx.stroke_rect(ox + CELL - 0.5, oy, 0.5, CELL);
+            }
+            if y + 1 < H && sim.territory[(y + 1) * W + x] != ti {
+                ctx.stroke_rect(ox, oy + CELL - 0.5, CELL, 0.5);
+            }
+        }
+    }
+
     let phase = (tick / 2) as usize % 6;
     ctx.set_fill_style_str("rgba(195,228,255,0.35)");
     for y in 0..H {
@@ -662,17 +702,6 @@ pub fn draw(
             }
         }
     }
-
-    let town_col: Vec<(u8, u8, u8)> = sim
-        .towns
-        .iter()
-        .map(|t| {
-            t.empire
-                .and_then(|e| sim.empires.get(e))
-                .map(|emp| (emp.r, emp.g, emp.b))
-                .unwrap_or((t.r, t.g, t.b))
-        })
-        .collect();
 
     for (i, t) in sim.towns.iter().enumerate() {
         if !t.alive {
