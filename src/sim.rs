@@ -2331,48 +2331,37 @@ impl Sim {
         spec: Species,
         home: Option<usize>,
     ) -> Option<(i32, i32)> {
-        let mut best = None;
-        let mut bd = max_d;
-        for a in &self.animals {
-            if a.species != spec || a.home != home {
-                continue;
-            }
-            let d = self.cheb(a.x, a.y, x, y);
-            if d <= bd {
-                bd = d;
-                best = Some((a.x, a.y));
-            }
-        }
-        best
+        self.nearest_animal_by(x, y, max_d, |a| a.species == spec && a.home == home)
+            .map(|(_, ax, ay)| (ax, ay))
     }
 
     fn nearest_wild_prey_i(&self, x: i32, y: i32, max_d: i32) -> Option<usize> {
-        let mut best = None;
-        let mut bd = max_d;
-        for (i, a) in self.animals.iter().enumerate() {
-            if a.species != Species::Deer && a.species != Species::Boar {
-                continue;
-            }
-            let d = self.cheb(a.x, a.y, x, y);
-            if d <= bd {
-                bd = d;
-                best = Some(i);
-            }
-        }
-        best
+        self.nearest_animal_by(x, y, max_d, |a| a.species == Species::Deer || a.species == Species::Boar)
+            .map(|(i, _, _)| i)
     }
 
     fn nearest_cow_i(&self, x: i32, y: i32, max_d: i32) -> Option<usize> {
+        self.nearest_animal_by(x, y, max_d, |a| a.species == Species::Cow && a.home.is_some())
+            .map(|(i, _, _)| i)
+    }
+
+    fn nearest_animal_by(
+        &self,
+        x: i32,
+        y: i32,
+        max_d: i32,
+        pred: impl Fn(&Animal) -> bool,
+    ) -> Option<(usize, i32, i32)> {
         let mut best = None;
         let mut bd = max_d;
         for (i, a) in self.animals.iter().enumerate() {
-            if a.species != Species::Cow || a.home.is_none() {
+            if !pred(a) {
                 continue;
             }
             let d = self.cheb(a.x, a.y, x, y);
             if d <= bd {
                 bd = d;
-                best = Some(i);
+                best = Some((i, a.x, a.y));
             }
         }
         best
