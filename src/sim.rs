@@ -1861,6 +1861,11 @@ impl Sim {
                 _ => 1.0,
             };
             let season_crop = if self.season == Season::Winter { 0.6 } else { 1.0 };
+            let weather_farm = match self.weather {
+                Weather::Heat => 0.7,
+                Weather::Frost => 0.5,
+                _ => 1.0,
+            };
             let season_water = if self.season == Season::Winter { 0.4 } else { 1.0 };
             let rain = self.weather == Weather::Rain;
             let water_regen = match self.weather {
@@ -1882,7 +1887,7 @@ impl Sim {
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
                         }
                         Terrain::Farm if !on_road => {
-                            let cr = (crop * season_crop + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 2.0 } else { 0.0 }) * agri_mult;
+                            let cr = (crop * season_crop * weather_farm + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 2.0 } else { 0.0 }) * agri_mult;
                             self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
                         }
                         Terrain::Water => {
@@ -1962,12 +1967,14 @@ impl Sim {
             let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
             if wells > 0 && pops[ti] > 0 {
                 let water_cap = stock_cap(&t.built, ResourceKind::Water);
-                t.stocks.water = clamp_stock(t.stocks.water, WELL_WATER_PER_TICK * wells as f32 * wmult, water_cap);
+                let rain_mult = if self.weather == Weather::Rain { 1.5 } else { 1.0 };
+                t.stocks.water = clamp_stock(t.stocks.water, WELL_WATER_PER_TICK * wells as f32 * wmult * rain_mult, water_cap);
             }
             let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
             if posts > 0 {
                 let gold_cap = stock_cap(&t.built, ResourceKind::Gold);
-                t.stocks.gold = clamp_stock(t.stocks.gold, TRADE_TRICKLE * posts as f32, gold_cap);
+                let trade_mult = if self.weather == Weather::Frost { 0.7 } else { 1.0 };
+                t.stocks.gold = clamp_stock(t.stocks.gold, TRADE_TRICKLE * posts as f32 * trade_mult, gold_cap);
             }
             if self.weather == Weather::Heat {
                 t.stocks.water = (t.stocks.water - 0.08).max(0.0);
