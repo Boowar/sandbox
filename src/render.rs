@@ -1317,7 +1317,21 @@ for a in &sim.animals {
             p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
             p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{} 📦{}", barracks, uni, smith, lib, temple, warehouse));
             if !t.queue.is_empty() {
-                p.push(format!(" ⏳ {} ({:.0}%)", queue_str, t.queue[0].1 * 100.0));
+                let current = &t.queue[0];
+                let pct = (current.1 / current.0.cost() * 100.0) as u32;
+                p.push(format!(" ⏳ {} ({}%)", queue_str, pct));
+                if t.queue.len() > 1 {
+                    let rest: Vec<&str> = t.queue[1..].iter().map(|(k, _)| match k {
+                        crate::sim::BuildingKind::House => "🏠", crate::sim::BuildingKind::Well => "⛲",
+                        crate::sim::BuildingKind::TradePost => "🏦", crate::sim::BuildingKind::Farm => "🌾",
+                        crate::sim::BuildingKind::Sanctuary => "⛪", crate::sim::BuildingKind::Clinic => "⛑",
+                        crate::sim::BuildingKind::Wall => "⛋", crate::sim::BuildingKind::Barracks => "⛩",
+                        crate::sim::BuildingKind::University => "🎓", crate::sim::BuildingKind::Smithy => "🔨",
+                        crate::sim::BuildingKind::Library => "📚", crate::sim::BuildingKind::Temple => "🛕",
+                        crate::sim::BuildingKind::Warehouse => "📦",
+                    }).collect();
+                    p.push(format!("  .Queue: {}", rest.join(" ")));
+                }
             }
             p.push(String::new());
             let mut role_line = String::new();
