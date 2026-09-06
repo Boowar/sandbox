@@ -325,6 +325,33 @@ impl Prophecy {
         }
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+pub enum SettlementTier {
+    Settlement,
+    Village,
+    City,
+}
+
+impl SettlementTier {
+    pub fn name(self) -> &'static str {
+        match self {
+            SettlementTier::Settlement => "Поселение",
+            SettlementTier::Village => "Деревня",
+            SettlementTier::City => "Город",
+        }
+    }
+
+    pub fn from_pop(pop: usize) -> Self {
+        if pop >= 31 {
+            SettlementTier::City
+        } else if pop >= 11 {
+            SettlementTier::Village
+        } else {
+            SettlementTier::Settlement
+        }
+    }
+}
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
 const WELL_WATER_PER_TICK: f32 = 1.5;
@@ -589,6 +616,7 @@ pub struct Settlement {
     pub alive: bool,
     pub waste: u64,
     pub dev: f32,
+    pub tier: SettlementTier,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -668,6 +696,7 @@ pub struct Sim {
     pub animals: Vec<Animal>,
     pub caravans: Vec<Caravan>,
     pub roads: Vec<bool>,
+    pub territory: Vec<i8>,
     pub social_links: Vec<SocialLink>,
     pub migrations: u32,
     pub alliances: Vec<(usize, usize, u64)>,
@@ -716,6 +745,7 @@ impl Sim {
             animals: Vec::new(),
             caravans: Vec::new(),
             roads: vec![false; W * H],
+            territory: vec![-1; W * H],
             social_links: Vec::new(),
             migrations: 0,
             alliances: Vec::new(),
@@ -1077,6 +1107,7 @@ impl Sim {
                 alive: true,
                 waste: 0,
                 dev: 0.0,
+                tier: SettlementTier::Settlement,
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -1786,6 +1817,36 @@ impl Sim {
         }
     }
 
+    pub fn settlement_radius(&self, ti: usize) -> i32 {
+        let buildings = self.towns[ti].built.len() as i32;
+        5 + buildings * 2
+    }
+
+    pub fn recalc_territory(&mut self) {
+        self.territory = vec![-1; W * H];
+        for ti in 0..self.towns.len() {
+            if !self.towns[ti].alive {
+                continue;
+            }
+            let tx = self.towns[ti].x;
+            let ty = self.towns[ti].y;
+            let radius = self.settlement_radius(ti);
+            let owner = ti as i8;
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let x = tx + dx;
+                    let y = ty + dy;
+                    if in_bounds(x, y) {
+                        let dist_sq = (dx * dx + dy * dy) as f32;
+                        if dist_sq <= (radius * radius) as f32 {
+                            self.territory[idx(x, y)] = owner;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn tick(&mut self) {
         self.tick_count += 1;
         self.weather_breath();
@@ -1797,6 +1858,16 @@ impl Sim {
                 Season::Autumn => Season::Winter,
                 Season::Winter => Season::Spring,
             };
+        }
+
+        for ti in 0..self.towns.len() {
+            if self.towns[ti].alive {
+                let pop = self.agents.iter().filter(|a| a.home == ti).count();
+                self.towns[ti].tier = SettlementTier::from_pop(pop);
+            }
+        }
+        if self.tick_count % 30 == 0 || self.tick_count == 1 {
+            self.recalc_territory();
         }
 
         let hunger_rate = match self.weather {
@@ -3408,10 +3479,11 @@ impl Sim {
                 researched: Vec::new(),
             plague_until: 0,
             empire: None,
-            alive: true,
-            waste: 0,
-            dev: 0.0,
-        });
+                alive: true,
+                waste: 0,
+                dev: 0.0,
+                tier: SettlementTier::Settlement,
+            });
         let ti = self.towns.len() - 1;
         let fid = self.families.len();
         self.families.push(Family {
@@ -5953,6 +6025,7 @@ fn marriages_form_and_cheapen_births() {
                 alive: true,
                 waste: 0,
                 dev: 0.0,
+                tier: SettlementTier::Settlement,
             });
         }
     }
@@ -6572,5 +6645,77 @@ fn marriages_form_and_cheapen_births() {
                 break;
             }
         }
+    }
+
+    #[test]
+    fn tier_progresses_with_population() {
+        assert_eq!(SettlementTier::from_pop(0), SettlementTier::Settlement);
+        assert_eq!(SettlementTier::from_pop(5), SettlementTier::Settlement);
+        assert_eq!(SettlementTier::from_pop(10), SettlementTier::Settlement);
+        assert_eq!(SettlementTier::from_pop(11), SettlementTier::Village);
+        assert_eq!(SettlementTier::from_pop(20), SettlementTier::Village);
+        assert_eq!(SettlementTier::from_pop(30), SettlementTier::Village);
+        assert_eq!(SettlementTier::from_pop(31), SettlementTier::City);
+        assert_eq!(SettlementTier::from_pop(100), SettlementTier::City);
+    }
+
+    #[test]
+    fn settlement_radius_depends_on_buildings() {
+        let mut s = Sim::new(1);
+        assert_eq!(s.settlement_radius(0), 5, "no buildings => radius 5");
+        s.towns[0].built.push(BuildingKind::Well);
+        assert_eq!(s.settlement_radius(0), 7, "1 building => radius 7");
+        s.towns[0].built.push(BuildingKind::Farm);
+        assert_eq!(s.settlement_radius(0), 9, "2 buildings => radius 9");
+        for _ in 0..8 {
+            s.towns[0].built.push(BuildingKind::House);
+        }
+        assert_eq!(s.settlement_radius(0), 25, "10 buildings => radius 25");
+    }
+
+    #[test]
+    fn territory_covers_town_area() {
+        let mut s = Sim::new(1);
+        s.recalc_territory();
+        let tx = s.towns[0].x;
+        let ty = s.towns[0].y;
+        let r = s.settlement_radius(0);
+        assert_eq!(s.territory[idx(tx, ty)], 0, "town center should be owned by town 0");
+        assert_eq!(s.territory[idx(tx + r, ty)], 0, "edge should be owned");
+        if in_bounds(tx + r + 1, ty) {
+            assert_eq!(s.territory[idx(tx + r + 1, ty)], -1, "beyond edge should be unowned");
+        }
+    }
+
+    #[test]
+    fn territory_updates_after_building() {
+        let mut s = Sim::new(1);
+        s.recalc_territory();
+        let r_before = s.settlement_radius(0);
+        s.towns[0].built.push(BuildingKind::Well);
+        s.towns[0].built.push(BuildingKind::Farm);
+        s.towns[0].built.push(BuildingKind::House);
+        s.recalc_territory();
+        let r_after = s.settlement_radius(0);
+        assert!(r_after > r_before, "radius should grow with buildings: {} > {}", r_after, r_before);
+        let tx = s.towns[0].x;
+        let ty = s.towns[0].y;
+        assert_eq!(s.territory[idx(tx + r_before + 1, ty)], 0, "newly expanded territory should be owned");
+    }
+
+    #[test]
+    fn tier_updates_during_tick() {
+        let mut s = Sim::new(1);
+        s.towns[0].tier = SettlementTier::Settlement;
+        while s.agents.iter().filter(|a| a.home == 0).count() < 35 {
+            s.tick();
+        }
+        let pop = s.agents.iter().filter(|a| a.home == 0).count();
+        assert!(pop >= 31, "pop should be >= 31, got {}", pop);
+        assert!(
+            s.towns[0].tier == SettlementTier::Village || s.towns[0].tier == SettlementTier::City,
+            "should be Village or City at pop >= 31, got {:?}",
+            s.towns[0].tier
+        );
     }
 }
