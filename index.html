@@ -9,34 +9,37 @@
       font-family: ui-monospace, Consolas, monospace; overflow: hidden;
       -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
     #wrap { height: 100%; display: flex; flex-direction: column; }
-    h1 { font-size: 14px; margin: 6px 10px; font-weight: 600; }
+    h1 { font-size: 12px; margin: 4px 8px; font-weight: 600; }
     #stage { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
     canvas { touch-action: none; display: block; image-rendering: pixelated;
       max-width: 100%; max-height: 100%; width: auto; height: auto;
       border: 1px solid #2a2f36; }
-    #controls { display: flex; gap: 8px; justify-content: center; align-items: center;
-      padding: 8px; flex-wrap: wrap; }
-    button { font-size: 22px; line-height: 1; padding: 12px 18px; min-width: 56px;
-      background: #1d2430; color: #eef3f7; border: 1px solid #2a2f36; border-radius: 10px;
+    #controls { display: flex; gap: 4px; justify-content: center; align-items: center;
+      padding: 4px 6px; flex-wrap: wrap; }
+    button { font-size: 18px; line-height: 1; padding: 6px 10px; min-width: 36px;
+      background: #1d2430; color: #eef3f7; border: 1px solid #2a2f36; border-radius: 6px;
       touch-action: manipulation; }
     button:active { background: #2a3442; }
-    #speedlbl { min-width: 58px; text-align: center; font-size: 14px; color: #9fb0c3; }
+    .sep { width: 1px; height: 20px; background: #2a2f36; margin: 0 2px; }
+    #speedlbl { min-width: 40px; text-align: center; font-size: 12px; color: #9fb0c3; }
   </style>
 </head>
 <body>
   <div id="wrap">
-    <h1>sandbox · имитация жизни</h1>
+    <h1>sandbox</h1>
     <div id="stage"><canvas id="game"></canvas></div>
     <div id="controls">
       <button id="btnPause">⏸</button>
       <button id="btnSlower">−</button>
       <span id="speedlbl">x2.0</span>
       <button id="btnFaster">+</button>
+      <div class="sep"></div>
       <button id="btnBless">🌱</button>
       <button id="btnInspire">💡</button>
       <button id="btnBuild" title="Застройка (N)">🏗</button>
       <button id="btnRoad" title="Дороги (D)">🛤</button>
       <button id="btnWeather">⛅</button>
+      <div class="sep"></div>
       <button id="btnHouse">🏠</button>
       <button id="btnWell">⛲</button>
       <button id="btnPost">🏦</button>
@@ -45,13 +48,13 @@
       <button id="btnClinic">⛑</button>
       <button id="btnWall">⛋</button>
       <button id="btnBarracks">⛩</button>
-      <button id="btnTemple" title="Храм (建成后 пророк)">🛕</button>
-      <button id="btnWarehouse" title="Склад (📦, E)">📦</button>
+      <button id="btnTemple">🛕</button>
+      <button id="btnWarehouse">📦</button>
+      <div class="sep"></div>
       <button id="btnCow">🐄</button>
-      <button id="btnHud" title="HUD настройки (F1-F7)">⚙</button>
+      <button id="btnHud" title="HUD (F1-F7)">⚙</button>
       <button id="btnSave" title="Сохранить (F5)">💾</button>
-      <button id="btnLoad" title="Загрузить файл">📂</button>
-      <button id="btnNew">R</button>
+      <button id="btnNew" title="Новый мир (R)">🔄</button>
     </div>
   </div>
 </body>

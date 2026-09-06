@@ -870,9 +870,6 @@ pub fn start() -> Result<(), JsValue> {
         a.save_to_local();
         a.download_save();
     })?;
-    bind_click(&document.get_element_by_id("btnLoad").ok_or("no btnLoad")?, &app, |a| {
-        a.upload_save();
-    })?;
 
     let app_loop = Rc::clone(&app);
     let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
