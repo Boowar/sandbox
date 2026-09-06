@@ -34,7 +34,7 @@ Rust → WebAssembly (wasm-bindgen / web-sys) проект — god-game «ими
 - **Автострой**: Well→House→Farm→Warehouse(60% food cap)→TradePost→Clinic→Sanctuary→Wall→Barracks→University→Smithy→Library; only when pop > 0
 - **Технологии**: 12 tech across 4 тиров; бонусы: Agriculture ×1.25 food, Construction +20% build, Warfare +0.20 def, Theology ×1.5 faith, Engineering −0.10 energy, Cartography caravan 2-step, Medicine ×0.5 plague, Metallurgy ×1.5 ore, Commerce ×0.8 prices, Philosophy +25% dev, Mastery −10% consumption
 - **Погода**: дождь +50% колодцы, жара −30% фермы, мороз −30% торговля + −30% фермы
-- **Ресурсы**: лес регенерирует медленно (REGROW_EVERY=44); руда/вода конечны; дожди/метеориты
+- **Ресурсы**: лес регенерирует медленно (REGROW_EVERY=100); руда/вода конечны; дожди/метеориты
 - **Торговля**: караваны между городами; торговые посты генерируют золото
 - **Миграция**: жители уходят из голодающих городов; не едут в мёртвые (pop=0)
 - **Дороги**: строятся/разбираются вручную (D); нельзя на воде/горах; лес на дороге не регенерирует; ускоряют караваны/армии
