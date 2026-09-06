@@ -2297,9 +2297,11 @@ impl Sim {
     }
 
     fn flee_from_agents(&self, x: i32, y: i32) -> (i32, i32) {
-        let ax = (self.agents.iter().map(|a| a.x).sum::<i32>() as f32 / self.agents.len().max(1) as f32) as i32;
-        let ay = (self.agents.iter().map(|a| a.y).sum::<i32>() as f32 / self.agents.len().max(1) as f32) as i32;
-        self.animal_step(x, y, ax, ay, true)
+        if let Some((ax, ay)) = self.nearest_agent(x, y, 8) {
+            self.animal_step(x, y, ax, ay, true)
+        } else {
+            (x, y)
+        }
     }
 
     pub fn cheb(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
@@ -5553,6 +5555,12 @@ mod tests {
         let mut s = Sim::new(84);
         s.towns[0].queue.push((BuildingKind::Clinic, CLINIC_COST - 1.0));
         s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 40.0 };
+        for f in s.families.iter_mut().filter(|f| f.town == 0 && !f.extinct) {
+            f.role = Role::Worker;
+            for a in s.agents.iter_mut().filter(|a| a.family == f.id) {
+                a.role = Role::Worker;
+            }
+        }
         for _ in 0..220 {
             s.tick();
         }
@@ -5562,8 +5570,7 @@ mod tests {
         );
         assert!(
             s.agents.iter().any(|a| a.role == Role::Healer),
-            "clinic should ordain healers (have {:?})",
-            s.towns[0].built
+            "clinic should ordain healers"
         );
     }
 
