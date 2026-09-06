@@ -19,7 +19,7 @@ const FIRE_CHANCE_P: u32 = 9000;
 const FIRE_LEN: u32 = 40;
 const FIRE_SPREAD_DIV: u64 = 8;
 const HORDE_EVERY: u64 = 1500;
-const HORDE_CHANCE_P: u32 = 8;
+const HORDE_CHANCE_P: u32 = 12;
 const HORDE_PACK_MAX: usize = 6;
 const GOLD_VEIN_EVERY: u64 = 1500;
 const GOLD_VEIN_CHANCE_P: u32 = 5;
@@ -1181,11 +1181,11 @@ impl Sim {
             let t = &self.towns[ti];
             (t.stocks.food, t.stocks.water, t.x, t.y)
         };
-        if f < 20.0 || w < 10.0 {
+        if f < 15.0 || w < 8.0 {
             return false;
         }
-        self.towns[ti].stocks.food -= 20.0;
-        self.towns[ti].stocks.water -= 10.0;
+        self.towns[ti].stocks.food -= 15.0;
+        self.towns[ti].stocks.water -= 8.0;
         let (tx, ty) = (
             tx0 + rnd(&mut self.rng) as i32 % 5 - 2,
             ty0 + rnd(&mut self.rng) as i32 % 5 - 2,
