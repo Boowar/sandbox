@@ -2519,13 +2519,13 @@ impl Sim {
     fn gather_action(&self, a: &Agent, force: Option<ResourceKind>) -> (Action, ResourceKind) {
         let kind = force.unwrap_or_else(|| self.role_kind(a));
         let d = match kind {
-            ResourceKind::Food => self.food_target(a.x, a.y),
-            ResourceKind::Water => self.water_target(a.x, a.y),
-            ResourceKind::Ore => self.ore_target(a.x, a.y),
+            ResourceKind::Food => self.resource_target(a.x, a.y, ResourceKind::Food),
+            ResourceKind::Water => self.resource_target(a.x, a.y, ResourceKind::Water),
+            ResourceKind::Ore => self.resource_target(a.x, a.y, ResourceKind::Ore),
             ResourceKind::Meat => self.meat_target(a.x, a.y),
             ResourceKind::Gold => None,
-            ResourceKind::Fish => self.fish_target(a.x, a.y),
-            ResourceKind::Wood => self.wood_target(a.x, a.y),
+            ResourceKind::Fish => self.resource_target(a.x, a.y, ResourceKind::Fish),
+            ResourceKind::Wood => self.resource_target(a.x, a.y, ResourceKind::Wood),
         };
         if let Some((fx, fy)) = d {
             let (nx, ny) = self.steer(a, fx, fy);
@@ -2546,13 +2546,9 @@ impl Sim {
                 };
                 for k in others {
                     let d = match k {
-                        ResourceKind::Food => self.food_target(a.x, a.y),
-                        ResourceKind::Water => self.water_target(a.x, a.y),
-                        ResourceKind::Ore => self.ore_target(a.x, a.y),
                         ResourceKind::Meat => self.meat_target(a.x, a.y),
                         ResourceKind::Gold => None,
-                        ResourceKind::Fish => self.fish_target(a.x, a.y),
-                        ResourceKind::Wood => self.wood_target(a.x, a.y),
+                        _ => self.resource_target(a.x, a.y, k),
                     };
                     if let Some((fx, fy)) = d {
                         let (nx, ny) = self.steer(a, fx, fy);
@@ -2644,43 +2640,41 @@ impl Sim {
         None
     }
 
-    fn food_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
-        self.seek(x, y, |s, nx, ny| {
-            let c = &s.grid[idx(nx, ny)];
-            is_food_source(c) && c.food > 0.5
-        })
-    }
-
-    fn wood_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
-        self.seek(x, y, |s, nx, ny| {
-            let c = &s.grid[idx(nx, ny)];
-            (c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle) && c.food > 1.0
-        })
-    }
-
-    fn water_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
-        self.seek(x, y, |s, nx, ny| {
-            s.grid[idx(nx, ny)].terrain.walkable() && s.water_adj_level(nx, ny)
-        })
-    }
-
-    fn fish_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
-        self.seek(x, y, |s, nx, ny| {
-            if !s.grid[idx(nx, ny)].terrain.walkable() { return false; }
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    if dx == 0 && dy == 0 { continue; }
-                    let wx = nx + dx;
-                    let wy = ny + dy;
-                    if !in_bounds(wx, wy) { continue; }
-                    let ci = idx(wx, wy);
-                    if s.grid[ci].terrain == Terrain::Water && s.grid[ci].food > 0.5 {
-                        return true;
+    fn resource_target(&self, x: i32, y: i32, kind: ResourceKind) -> Option<(i32, i32)> {
+        match kind {
+            ResourceKind::Food => self.seek(x, y, |s, nx, ny| {
+                let c = &s.grid[idx(nx, ny)];
+                is_food_source(c) && c.food > 0.5
+            }),
+            ResourceKind::Wood => self.seek(x, y, |s, nx, ny| {
+                let c = &s.grid[idx(nx, ny)];
+                (c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle) && c.food > 1.0
+            }),
+            ResourceKind::Water => self.seek(x, y, |s, nx, ny| {
+                s.grid[idx(nx, ny)].terrain.walkable() && s.water_adj_level(nx, ny)
+            }),
+            ResourceKind::Fish => self.seek(x, y, |s, nx, ny| {
+                if !s.grid[idx(nx, ny)].terrain.walkable() { return false; }
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        if dx == 0 && dy == 0 { continue; }
+                        let wx = nx + dx;
+                        let wy = ny + dy;
+                        if !in_bounds(wx, wy) { continue; }
+                        let ci = idx(wx, wy);
+                        if s.grid[ci].terrain == Terrain::Water && s.grid[ci].food > 0.5 {
+                            return true;
+                        }
                     }
                 }
-            }
-            false
-        })
+                false
+            }),
+            ResourceKind::Ore => self.seek(x, y, |s, nx, ny| {
+                let c = &s.grid[idx(nx, ny)];
+                c.terrain == Terrain::Hills && c.ore > 0.5
+            }),
+            ResourceKind::Gold | ResourceKind::Meat => None,
+        }
     }
 
     fn water_adj_level(&self, x: i32, y: i32) -> bool {
@@ -2697,13 +2691,6 @@ impl Sim {
             }
         }
         false
-    }
-
-    fn ore_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
-        self.seek(x, y, |s, nx, ny| {
-            let c = &s.grid[idx(nx, ny)];
-            c.terrain == Terrain::Hills && c.ore > 0.5
-        })
     }
 
     fn meat_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
