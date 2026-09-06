@@ -96,6 +96,15 @@ const BASE_FISH_CAP: f32 = 60.0;
 const BASE_GOLD_CAP: f32 = 200.0;
 const TRADE_POST_COST: f32 = 40.0;
 const TRADE_TRICKLE: f32 = 0.03;
+const AUTO_TRADEPOST_FOOD: f32 = 80.0;
+const AUTO_TRADEPOST_WATER: f32 = 60.0;
+const AUTO_SANCTUARY_FAITH: f32 = 10.0;
+const AUTO_UNI_POP: usize = 15;
+const AUTO_SMITHY_POP: usize = 20;
+const AUTO_LIBRARY_POP: usize = 25;
+const AUTO_LIBRARY_GOLD: f32 = 20.0;
+const WASTE_FOOD: f32 = 12.0;
+const WASTE_WATER: f32 = 8.0;
 const CARAVAN_EVERY: u64 = 900;
 const CARAVAN_CAPACITY: f32 = 10.0;
 const CARAVAN_MAX: usize = 16;
@@ -1724,7 +1733,7 @@ impl Sim {
                         t.queue.push((BuildingKind::House, 0.0));
                     } else if !has(BuildingKind::Farm) && !need(BuildingKind::Farm) {
                         t.queue.push((BuildingKind::Farm, 0.0));
-                    } else if t.stocks.food > 80.0 && t.stocks.water > 60.0
+                    } else if t.stocks.food > AUTO_TRADEPOST_FOOD && t.stocks.water > AUTO_TRADEPOST_WATER
                         && !has(BuildingKind::TradePost) && !need(BuildingKind::TradePost)
                     {
                         t.queue.push((BuildingKind::TradePost, 0.0));
@@ -1733,18 +1742,18 @@ impl Sim {
                     {
                         t.queue.push((BuildingKind::Clinic, 0.0));
                     } else if !has(BuildingKind::Sanctuary) && !need(BuildingKind::Sanctuary)
-                        && t.faith >= 10.0
+                        && t.faith >= AUTO_SANCTUARY_FAITH
                     {
                         t.queue.push((BuildingKind::Sanctuary, 0.0));
                     } else if t.at_war && !has(BuildingKind::Wall) && !need(BuildingKind::Wall) {
                         t.queue.push((BuildingKind::Wall, 0.0));
                     } else if t.at_war && !has(BuildingKind::Barracks) && !need(BuildingKind::Barracks) {
                         t.queue.push((BuildingKind::Barracks, 0.0));
-                    } else if pop_ti >= 15 && !has(BuildingKind::University) && !need(BuildingKind::University) {
+                    } else if pop_ti >= AUTO_UNI_POP && !has(BuildingKind::University) && !need(BuildingKind::University) {
                         t.queue.push((BuildingKind::University, 0.0));
-                    } else if pop_ti >= 20 && !has(BuildingKind::Smithy) && !need(BuildingKind::Smithy) {
+                    } else if pop_ti >= AUTO_SMITHY_POP && !has(BuildingKind::Smithy) && !need(BuildingKind::Smithy) {
                         t.queue.push((BuildingKind::Smithy, 0.0));
-                    } else if pop_ti >= 25 && t.stocks.gold >= 20.0
+                    } else if pop_ti >= AUTO_LIBRARY_POP && t.stocks.gold >= AUTO_LIBRARY_GOLD
                         && !has(BuildingKind::Library) && !need(BuildingKind::Library)
                     {
                         t.queue.push((BuildingKind::Library, 0.0));
@@ -3314,7 +3323,7 @@ impl Sim {
             if !self.towns[ti].alive {
                 continue;
             }
-            let ruined = self.pop(ti) == 0 && self.towns[ti].stocks.food < 12.0 && self.towns[ti].stocks.water < 8.0;
+            let ruined = self.pop(ti) == 0 && self.towns[ti].stocks.food < WASTE_FOOD && self.towns[ti].stocks.water < WASTE_WATER;
             let waste = if ruined { self.towns[ti].waste + 1 } else { 0 };
             self.towns[ti].waste = waste;
             if waste >= TOWN_WASTE_NEED {
@@ -3784,7 +3793,7 @@ impl Sim {
                 if ti == home || !self.towns[ti].alive {
                     continue;
                 }
-                if self.towns[ti].stocks.food < 12.0 && self.towns[ti].stocks.water < 8.0 && self.pop(ti) == 0 {
+                if self.towns[ti].stocks.food < WASTE_FOOD && self.towns[ti].stocks.water < WASTE_WATER && self.pop(ti) == 0 {
                     continue;
                 }
                 if self.towns[home].at_war && self.towns[home].enemy == Some(ti) {
