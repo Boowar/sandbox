@@ -348,7 +348,7 @@ fn walkable(self) -> bool {
 }
 
 fn is_food_source(c: &Cell) -> bool {
-    c.terrain == Terrain::Forest || c.terrain == Terrain::Farm || c.terrain == Terrain::Jungle || c.terrain == Terrain::Swamp
+    c.terrain == Terrain::Forest || c.terrain == Terrain::Farm || c.terrain == Terrain::Jungle || c.terrain == Terrain::Swamp || c.terrain == Terrain::CoralReef
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
