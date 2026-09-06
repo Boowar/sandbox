@@ -580,6 +580,7 @@ impl App {
             "9" => self.build(sim::BuildingKind::University),
             "0" => self.build(sim::BuildingKind::Smithy),
             "q" | "Q" | "й" | "Й" => self.build(sim::BuildingKind::Library),
+            "e" | "E" | "у" | "У" => self.build(sim::BuildingKind::Warehouse),
             "c" | "C" | "с" | "С" => self.breed_cows(),
             "r" | "R" | "к" | "К" => self.new_world(),
             "F5" => self.save_to_local(),
@@ -848,6 +849,9 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnTemple").ok_or("no btnTemple")?, &app, |a| {
         a.build(sim::BuildingKind::Temple)
+    })?;
+    bind_click(&document.get_element_by_id("btnWarehouse").ok_or("no btnWarehouse")?, &app, |a| {
+        a.build(sim::BuildingKind::Warehouse)
     })?;
     bind_click(&document.get_element_by_id("btnCow").ok_or("no btnCow")?, &app, |a| {
         a.breed_cows()
