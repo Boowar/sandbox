@@ -17,6 +17,7 @@ pub struct HudConfig {
     pub show_caravans: bool,
     pub show_weather: bool,
     pub show_tech_tree: bool,
+    pub hud_font_size: f64,
 }
 
 impl Default for HudConfig {
@@ -29,6 +30,7 @@ impl Default for HudConfig {
             show_caravans: true,
             show_weather: true,
             show_tech_tree: false,
+            hud_font_size: 11.0,
         }
     }
 }
@@ -1112,14 +1114,15 @@ for a in &sim.animals {
     line_colors.push(None);
 
     let pw = 350.0;
-    let ph = 14.0 + lines.len() as f64 * 15.0;
+    let line_h = hud.hud_font_size + 4.0;
+    let ph = 14.0 + lines.len() as f64 * line_h;
     ctx.set_fill_style_str("rgba(10,14,18,0.78)");
     ctx.fill_rect(4.0, 4.0, pw, ph);
     ctx.set_stroke_style_str("rgb(60,68,80)");
     ctx.begin_path();
     ctx.rect(4.0, 4.0, pw, ph);
     ctx.stroke();
-    ctx.set_font("12px ui-monospace, monospace");
+    ctx.set_font(&format!("{}px ui-monospace, monospace", hud.hud_font_size));
     let mut chips: Vec<Option<(u8, u8, u8)>> = vec![None; lines.len()];
     for (row, ti) in town_rows {
         let t = &sim.towns[ti];
@@ -1129,7 +1132,7 @@ for a in &sim.animals {
     for (i, l) in lines.iter().enumerate() {
         if let Some((r, g, b)) = chips[i] {
             ctx.set_fill_style_str(&format!("rgb({},{},{})", r, g, b));
-            ctx.fill_rect(10.0, 13.0 + i as f64 * 15.0, 10.0, 10.0);
+            ctx.fill_rect(10.0, 13.0 + i as f64 * line_h, 10.0, 10.0);
         } else if let Some((r, g, b)) = line_colors[i] {
             ctx.set_fill_style_str(&format!("rgb({},{},{})", r, g, b));
         } else if i <= 1 {
@@ -1137,7 +1140,7 @@ for a in &sim.animals {
         } else {
             ctx.set_fill_style_str("rgb(220,228,238)");
         }
-        let _ = ctx.fill_text(l, 14.0 + if chips[i].is_some() { 12.0 } else { 0.0 }, 16.0 + i as f64 * 15.0);
+        let _ = ctx.fill_text(l, 14.0 + if chips[i].is_some() { 12.0 } else { 0.0 }, 16.0 + i as f64 * line_h);
     }
 
     if hud.show_tech_tree {
