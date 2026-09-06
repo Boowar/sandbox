@@ -1215,7 +1215,7 @@ impl Sim {
             if !self.has_trade_post(ti) {
                 continue;
             }
-            let built = self.towns[ti].built.clone();
+            let built = &self.towns[ti].built;
             let (mut f, mut w, mut o, mut m, mut g, mut fi) = {
                 let s = &self.towns[ti].stocks;
                 (s.food, s.water, s.ore, s.meat, s.gold, s.fish)
@@ -1959,18 +1959,26 @@ impl Sim {
         }
 
         let wmult = if self.is_night() { NIGHT_WORK_MULT } else { 1.0 };
-        let pops: Vec<usize> = (0..self.towns.len()).map(|ti| self.pop(ti)).collect();
+        let n_towns = self.towns.len();
+        let pops: Vec<usize> = (0..n_towns).map(|ti| self.pop(ti)).collect();
+        let building_counts: Vec<(usize, usize, usize, usize)> = (0..n_towns).map(|ti| {
+            let t = &self.towns[ti];
+            let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
+            let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
+            let sanctuaries = t.built.iter().filter(|b| **b == BuildingKind::Sanctuary).count();
+            let temples = t.built.iter().filter(|b| **b == BuildingKind::Temple).count();
+            (wells, posts, sanctuaries, temples)
+        }).collect();
         for (ti, t) in self.towns.iter_mut().enumerate() {
             if !t.alive {
                 continue;
             }
-            let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
+            let (wells, posts, sanctuaries, temples) = building_counts[ti];
             if wells > 0 && pops[ti] > 0 {
                 let water_cap = stock_cap(&t.built, ResourceKind::Water);
                 let rain_mult = if self.weather == Weather::Rain { 1.5 } else { 1.0 };
                 t.stocks.water = clamp_stock(t.stocks.water, WELL_WATER_PER_TICK * wells as f32 * wmult * rain_mult, water_cap);
             }
-            let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
             if posts > 0 {
                 let gold_cap = stock_cap(&t.built, ResourceKind::Gold);
                 let trade_mult = if self.weather == Weather::Frost { 0.7 } else { 1.0 };
@@ -1985,10 +1993,10 @@ impl Sim {
                     t.idea = TownIdea::None;
                 }
             }
-            let sanctuaries = t.built.iter().filter(|b| **b == BuildingKind::Sanctuary).count() as f32;
-            if sanctuaries > 0.0 {
+            let sanctuaries_f = sanctuaries as f32;
+            if sanctuaries_f > 0.0 {
                 let faith_mult = if t.researched.contains(&Tech::Theology) { 1.5 } else { 1.0 };
-                t.faith = (t.faith + FAITH_GAIN_PER_TICK * sanctuaries * faith_mult).min(100.0);
+                t.faith = (t.faith + FAITH_GAIN_PER_TICK * sanctuaries_f * faith_mult).min(100.0);
             }
             if t.blessing_left > 0.0 {
                 t.blessing_left -= 1.0;
@@ -2014,9 +2022,9 @@ impl Sim {
                     t.prophecy = Prophecy::None;
                 }
             }
-            let temples = t.built.iter().filter(|b| **b == BuildingKind::Temple).count() as f32;
-            if temples > 0.0 {
-                t.revelation = (t.revelation + REVELATION_PER_TICK * temples).min(100.0);
+            let temples_f = temples as f32;
+            if temples_f > 0.0 {
+                t.revelation = (t.revelation + REVELATION_PER_TICK * temples_f).min(100.0);
             }
             if self.tick_count % RITUAL_EVERY == 0 && t.revelation >= PROPHECY_COST && t.prophecy == Prophecy::None {
                 t.revelation -= PROPHECY_COST;
@@ -2049,9 +2057,9 @@ impl Sim {
         self.plague_step();
         self.heal_step();
 
-        let actions: Vec<(Action, ResourceKind)> = self.agents.iter().map(|a| self.decide(a)).collect();
         let mut dead = Vec::new();
-        for (i, (act, want)) in actions.into_iter().enumerate() {
+        for i in 0..self.agents.len() {
+            let (act, want) = self.decide(&self.agents[i]);
             self.agents[i].want = want;
             self.apply(i, act, &mut dead);
         }
