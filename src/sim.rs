@@ -1523,116 +1523,18 @@ impl Sim {
         }
     }
 
-    fn promote_priest(&mut self, ti: usize) {
-        if self.towns[ti].built.iter().any(|b| *b == BuildingKind::Sanctuary) {
-            return;
-        }
+    fn promote_role(&mut self, ti: usize, new_role: Role, allowed: &[Role]) {
         for fid in 0..self.families.len() {
             if self.families[fid].town != ti || self.families[fid].extinct {
                 continue;
             }
-            if self.families[fid].role == Role::Worker {
-                self.families[fid].role = Role::Priest;
-                for a in self.agents.iter_mut() {
-                    if a.family == fid {
-                        a.role = Role::Priest;
-                    }
-                }
-                break;
-            }
-        }
-    }
-
-    fn promote_prophet(&mut self, ti: usize) {
-        for fid in 0..self.families.len() {
-            if self.families[fid].town != ti || self.families[fid].extinct {
+            if !allowed.contains(&self.families[fid].role) {
                 continue;
             }
-            if self.families[fid].role == Role::Priest {
-                self.families[fid].role = Role::Prophet;
-                for a in self.agents.iter_mut() {
-                    if a.family == fid {
-                        a.role = Role::Prophet;
-                    }
-                }
-                break;
-            }
-        }
-    }
-
-    fn promote_healer(&mut self, ti: usize) {
-        for fid in 0..self.families.len() {
-            if self.families[fid].town != ti || self.families[fid].extinct {
-                continue;
-            }
-            if self.families[fid].role == Role::Worker
-                || self.families[fid].role == Role::Hunter
-            {
-                self.families[fid].role = Role::Healer;
-                for a in self.agents.iter_mut() {
-                    if a.family == fid {
-                        a.role = Role::Healer;
-                    }
-                }
-                break;
-            }
-        }
-    }
-
-    fn promote_guard(&mut self, ti: usize) {
-        for fid in 0..self.families.len() {
-            if self.families[fid].town != ti || self.families[fid].extinct {
-                continue;
-            }
-            if self.families[fid].role == Role::Priest || self.families[fid].role == Role::Healer {
-                continue;
-            }
-            self.families[fid].role = Role::Guard;
+            self.families[fid].role = new_role;
             for a in self.agents.iter_mut() {
                 if a.family == fid {
-                    a.role = Role::Guard;
-                }
-            }
-            break;
-        }
-    }
-
-    fn promote_scholar(&mut self, ti: usize) {
-        for fid in 0..self.families.len() {
-            if self.families[fid].town != ti || self.families[fid].extinct {
-                continue;
-            }
-            if matches!(
-                self.families[fid].role,
-                Role::Priest | Role::Healer | Role::Guard | Role::Scholar
-            ) {
-                continue;
-            }
-            self.families[fid].role = Role::Scholar;
-            for a in self.agents.iter_mut() {
-                if a.family == fid {
-                    a.role = Role::Scholar;
-                }
-            }
-            break;
-        }
-    }
-
-    fn promote_builder(&mut self, ti: usize) {
-        for fid in 0..self.families.len() {
-            if self.families[fid].town != ti || self.families[fid].extinct {
-                continue;
-            }
-            if matches!(
-                self.families[fid].role,
-                Role::Priest | Role::Healer | Role::Guard | Role::Scholar | Role::Builder
-            ) {
-                continue;
-            }
-            self.families[fid].role = Role::Builder;
-            for a in self.agents.iter_mut() {
-                if a.family == fid {
-                    a.role = Role::Builder;
+                    a.role = new_role;
                 }
             }
             break;
@@ -1850,22 +1752,24 @@ impl Sim {
                     self.plant_fields(x, y);
                 }
                 if k == BuildingKind::Sanctuary {
-                    self.promote_priest(ti);
+                    if !self.towns[ti].built.iter().any(|b| *b == BuildingKind::Sanctuary) {
+                        self.promote_role(ti, Role::Priest, &[Role::Worker]);
+                    }
                 }
                 if k == BuildingKind::Clinic {
-                    self.promote_healer(ti);
+                    self.promote_role(ti, Role::Healer, &[Role::Worker, Role::Hunter]);
                 }
                 if k == BuildingKind::Barracks {
-                    self.promote_guard(ti);
+                    self.promote_role(ti, Role::Guard, &[Role::Worker, Role::Hunter, Role::Builder]);
                 }
                 if k == BuildingKind::Temple {
-                    self.promote_prophet(ti);
+                    self.promote_role(ti, Role::Prophet, &[Role::Priest]);
                 }
                 if k == BuildingKind::University {
-                    self.promote_scholar(ti);
+                    self.promote_role(ti, Role::Scholar, &[Role::Worker, Role::Hunter, Role::Builder]);
                 }
                 if k == BuildingKind::Smithy {
-                    self.promote_builder(ti);
+                    self.promote_role(ti, Role::Builder, &[Role::Worker, Role::Hunter, Role::Builder]);
                 }
                 self.towns[ti].built.push(k);
             }
