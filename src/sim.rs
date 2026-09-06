@@ -1226,25 +1226,27 @@ impl Sim {
             let mc = stock_cap(&built, ResourceKind::Meat);
             let gc = stock_cap(&built, ResourceKind::Gold);
             let fic = stock_cap(&built, ResourceKind::Fish);
-            if f < BUY_FOOD_AT && g >= trade_price(ResourceKind::Food) * 2.0 {
+            let has_commerce = self.towns[ti].researched.contains(&Tech::Commerce);
+            let trade_mult = if has_commerce { 0.8 } else { 1.0 };
+            if f < BUY_FOOD_AT && g >= trade_price(ResourceKind::Food) * 2.0 * trade_mult {
                 f = clamp_stock(f, 2.0, fc);
-                g -= trade_price(ResourceKind::Food) * 2.0;
+                g -= trade_price(ResourceKind::Food) * 2.0 * trade_mult;
             }
-            if w < BUY_WATER_AT && g >= trade_price(ResourceKind::Water) * 2.0 {
+            if w < BUY_WATER_AT && g >= trade_price(ResourceKind::Water) * 2.0 * trade_mult {
                 w = clamp_stock(w, 2.0, wc);
-                g -= trade_price(ResourceKind::Water) * 2.0;
+                g -= trade_price(ResourceKind::Water) * 2.0 * trade_mult;
             }
-            if o < BUY_ORE_AT && g >= trade_price(ResourceKind::Ore) {
+            if o < BUY_ORE_AT && g >= trade_price(ResourceKind::Ore) * trade_mult {
                 o = clamp_stock(o, 1.0, oc);
-                g -= trade_price(ResourceKind::Ore);
+                g -= trade_price(ResourceKind::Ore) * trade_mult;
             }
-            if m < BUY_MEAT_AT && g >= trade_price(ResourceKind::Meat) {
+            if m < BUY_MEAT_AT && g >= trade_price(ResourceKind::Meat) * trade_mult {
                 m = clamp_stock(m, 1.0, mc);
-                g -= trade_price(ResourceKind::Meat);
+                g -= trade_price(ResourceKind::Meat) * trade_mult;
             }
-            if fi < BUY_FISH_AT && g >= trade_price(ResourceKind::Fish) {
+            if fi < BUY_FISH_AT && g >= trade_price(ResourceKind::Fish) * trade_mult {
                 fi = clamp_stock(fi, 1.0, fic);
-                g -= trade_price(ResourceKind::Fish);
+                g -= trade_price(ResourceKind::Fish) * trade_mult;
             }
             g = g.max(0.0).min(gc);
             let s = &mut self.towns[ti].stocks;
@@ -1393,7 +1395,8 @@ impl Sim {
                 let (nx, ny) = self.caravan_step(x, y, tx, ty);
                 self.caravans[i].x = nx;
                 self.caravans[i].y = ny;
-                if self.roads[idx(nx, ny)] {
+                let has_carto = self.towns[home].researched.contains(&Tech::Cartography);
+                if self.roads[idx(nx, ny)] || has_carto {
                     let (nx2, ny2) = self.caravan_step(nx, ny, tx, ty);
                     self.caravans[i].x = nx2;
                     self.caravans[i].y = ny2;
@@ -1662,7 +1665,9 @@ impl Sim {
                 + DEV_UNI_BONUS * uni as f32
                 + DEV_LIB_BONUS * lib as f32
                 + DEV_SCHOLAR_BONUS * scholars as f32;
-            self.towns[ti].dev += gain;
+            let has_philo = self.towns[ti].researched.contains(&Tech::Philosophy);
+            let philo_bonus = if has_philo { gain * 0.25 } else { 0.0 };
+            self.towns[ti].dev += gain + philo_bonus;
             let tier = self.tech_tier(ti);
             let all_techs: Vec<Tech> = vec![
                 Tech::Agriculture, Tech::Mining, Tech::Construction,
@@ -1820,6 +1825,8 @@ impl Sim {
             _ => 0.8,
         };
         // добавлю возраст в цикл голода/жажды
+        let has_mastery = self.towns.iter().any(|t| t.researched.contains(&Tech::Mastery));
+        let mastery_mult = if has_mastery { 0.9 } else { 1.0 };
         for a in self.agents.iter_mut() {
             a.age = a.age.saturating_add(1);
             let mut metabolism = if a.age < CHILD_AGE { 0.8 } else { 1.0 };
@@ -1827,9 +1834,9 @@ impl Sim {
                 metabolism = 1.25;
             }
             let sick_rate = if a.sick > 0 { 1.4 * metabolism } else { metabolism };
-            a.hunger = (a.hunger + hunger_rate * sick_rate).min(140.0);
+            a.hunger = (a.hunger + hunger_rate * sick_rate * mastery_mult).min(140.0);
             let thirst_sick = if a.sick > 0 { 1.3 * metabolism } else { metabolism };
-            a.thirst = (a.thirst + thirst_rate * thirst_sick).min(140.0);
+            a.thirst = (a.thirst + thirst_rate * thirst_sick * mastery_mult).min(140.0);
         }
 
         if self.tick_count % REGROW_EVERY == 0 {
@@ -2835,6 +2842,8 @@ impl Sim {
                     a.dir_x = (nx - ox).clamp(-1, 1);
                     a.dir_y = (ny - oy).clamp(-1, 1);
                     a.energy -= if on_road { 0.3 } else { 0.6 };
+                    let has_engi = self.towns[a.home].researched.contains(&Tech::Engineering);
+                    if has_engi { a.energy += 0.1; }
                     if self.grid[idx(nx, ny)].terrain == Terrain::Volcano {
                         a.energy -= 1.5;
                     }
@@ -2877,8 +2886,9 @@ impl Sim {
                             ResourceKind::Ore => {
                                 let c = &self.grid[idx(nx, ny)];
                                 if c.terrain == Terrain::Hills && c.ore > 0.5 {
-                                    self.grid[idx(nx, ny)].ore -= 1.0;
-                                    a.carry = Some((ResourceKind::Ore, 1.0));
+                                    let ore_qty = if self.towns[a.home].researched.contains(&Tech::Metallurgy) { 1.5 } else { 1.0 };
+                                    self.grid[idx(nx, ny)].ore -= ore_qty;
+                                    a.carry = Some((ResourceKind::Ore, ore_qty));
                                 }
                             }
                             ResourceKind::Meat => {}
@@ -3088,7 +3098,9 @@ impl Sim {
                 if crowded && (foul || at_war) {
                     let h = self.brain(tx, ty, self.tick_count);
                     let dice = h % 100000;
-                    let chance = if prophylaxis { PLAGUE_CHANCE * 0.3 } else { PLAGUE_CHANCE };
+                    let chance = if prophylaxis { PLAGUE_CHANCE * 0.3 }
+                        else if self.towns[ti].researched.contains(&Tech::Medicine) { PLAGUE_CHANCE * 0.5 }
+                        else { PLAGUE_CHANCE };
                     if dice < (chance * 100000.0) as u32 {
                         self.towns[ti].plague_until = PLAGUE_LEN;
                         let patient = self
