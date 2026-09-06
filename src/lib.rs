@@ -559,6 +559,13 @@ impl App {
 
     fn on_key(&mut self, e: KeyboardEvent) {
         match e.key().as_str() {
+            "Escape" => {
+                self.bless_mode = false;
+                self.inspire_mode = false;
+                self.build_mode = false;
+                self.road_mode = false;
+                self.selected_town = None;
+            }
             " " => self.toggle_pause(),
             "+" | "=" => self.change_speed(1.0),
             "-" | "_" | "—" => self.change_speed(-1.0),

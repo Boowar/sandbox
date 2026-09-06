@@ -894,7 +894,6 @@ impl Sim {
     }
 
     fn scatter_reefs(&mut self) {
-        let rng_seed = self.rng;
         for i in 0..W * H {
             if self.grid[i].terrain == Terrain::Water {
                 let h = ((i as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) % 100;
@@ -904,7 +903,6 @@ impl Sim {
                 }
             }
         }
-        let _ = rng_seed;
     }
 
     fn scatter_volcanoes(&mut self) {
@@ -1824,7 +1822,6 @@ impl Sim {
             Weather::Heat => 1.1,
             _ => 0.8,
         };
-        // добавлю возраст в цикл голода/жажды
         let has_mastery = self.towns.iter().any(|t| t.researched.contains(&Tech::Mastery));
         let mastery_mult = if has_mastery { 0.9 } else { 1.0 };
         for a in self.agents.iter_mut() {
