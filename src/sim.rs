@@ -3348,6 +3348,8 @@ impl Sim {
                 continue;
             }
             if let Some((x, y)) = self.colony_spot(mi) {
+                self.towns[mi].stocks.food -= FOUND_MIN_FOOD;
+                self.towns[mi].stocks.water -= FOUND_MIN_WATER;
                 self.found_colony(mi, x, y);
             }
         }
