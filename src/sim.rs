@@ -539,6 +539,7 @@ pub struct Cell {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Agent {
+    pub id: u32,
     pub home: usize,
     pub x: i32,
     pub y: i32,
@@ -641,8 +642,8 @@ pub struct Caravan {
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SocialLink {
-    pub a: usize,
-    pub b: usize,
+    pub a: u32,
+    pub b: u32,
     pub bond: f32,
 }
 
@@ -679,6 +680,7 @@ pub struct Sim {
     pub season: Season,
     pub day_phase: u64,
     pub rng: u64,
+    pub next_agent_id: u32,
 }
 
 fn idx(x: i32, y: i32) -> usize {
@@ -726,6 +728,7 @@ impl Sim {
             season: Season::Spring,
             day_phase: 0,
             rng,
+            next_agent_id: 0,
         };
         sim.ensure_hills();
         sim.scatter_reefs();
@@ -1114,7 +1117,10 @@ impl Sim {
             let x = cx + (ang.cos() * r) as i32;
             let y = cy + (ang.sin() * r) as i32;
             if in_bounds(x, y) && self.grid[idx(x, y)].terrain.walkable() {
+                let id = self.next_agent_id;
+                self.next_agent_id += 1;
                 self.agents.push(Agent {
+                    id,
                     home,
                     x,
                     y,
@@ -1138,7 +1144,10 @@ impl Sim {
                 return;
             }
         }
+        let fallback_id = self.next_agent_id;
+        self.next_agent_id += 1;
         self.agents.push(Agent {
+            id: fallback_id,
             home,
             x: cx,
             y: cy,
@@ -3029,18 +3038,21 @@ impl Sim {
                     } else {
                         -0.3
                     };
+                    let ai = self.agents[i].id;
+                    let aj = self.agents[j].id;
                     if let Some(link) = self.social_links.iter_mut().find(|l| {
-                        (l.a == i && l.b == j) || (l.a == j && l.b == i)
+                        (l.a == ai && l.b == aj) || (l.a == aj && l.b == ai)
                     }) {
                         link.bond = (link.bond + bond * 0.1).clamp(-1.0, 1.0);
                     } else {
-                        self.social_links.push(SocialLink { a: i, b: j, bond });
+                        self.social_links.push(SocialLink { a: ai, b: aj, bond });
                     }
                 }
             }
         }
+        let agent_ids: std::collections::HashSet<u32> = self.agents.iter().map(|a| a.id).collect();
         self.social_links.retain(|l| {
-            l.bond.abs() > MOOD_LINK_DECAY && l.a < n && l.b < n
+            l.bond.abs() > MOOD_LINK_DECAY && agent_ids.contains(&l.a) && agent_ids.contains(&l.b)
         });
         for link in self.social_links.iter_mut() {
             if link.bond > 0.0 {
@@ -4929,6 +4941,7 @@ mod tests {
             .expect("lake shore");
         let vol_before = lake_volume(&s);
         let a = Agent {
+            id: 0,
             home: 0,
             x: shore.0,
             y: shore.1,
@@ -5752,6 +5765,7 @@ mod tests {
 
     fn migration_agent(home: usize, x: i32, y: i32, age: u32, sick: u32) -> Agent {
         Agent {
+            id: 0,
             home,
             x,
             y,
