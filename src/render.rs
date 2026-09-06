@@ -1288,12 +1288,17 @@ for a in &sim.animals {
             p.push(String::new());
 
             let res_bar = |v: f32, max: f32| -> String {
-                let len = ((v / max).clamp(0.0, 1.0) * 8.0) as usize;
+                let ratio = (v / max).clamp(0.0, 1.0);
+                let len = (ratio * 8.0) as usize;
                 let mut bar = String::new();
                 for j in 0..8 {
                     if j < len { bar.push('█'); } else { bar.push('░'); }
                 }
                 bar
+            };
+            let res_color = |v: f32, max: f32| -> &'static str {
+                let r = v / max;
+                if r > 0.6 { "🟢" } else if r > 0.3 { "🟡" } else if r > 0.0 { "🔴" } else { "⚫" }
             };
             let fc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Food);
             let wc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Water);
@@ -1301,12 +1306,12 @@ for a in &sim.animals {
             let mc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Meat);
             let gc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Gold);
             let fic = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Fish);
-            p.push(format!(" 🌾 food  {:>5.0}/{:.0} [{}]", t.stocks.food, fc, res_bar(t.stocks.food, fc)));
-            p.push(format!(" 💧 water {:>5.0}/{:.0} [{}]", t.stocks.water, wc, res_bar(t.stocks.water, wc)));
-            p.push(format!(" ⛏ ore   {:>5.0}/{:.0} [{}]", t.stocks.ore, oc, res_bar(t.stocks.ore, oc)));
-            p.push(format!(" 🥩 meat  {:>5.0}/{:.0} [{}]", t.stocks.meat, mc, res_bar(t.stocks.meat, mc)));
-            p.push(format!(" 💰 gold  {:>5.0}/{:.0} [{}]", t.stocks.gold, gc, res_bar(t.stocks.gold, gc)));
-            p.push(format!(" 🐟 fish  {:>5.0}/{:.0} [{}]", t.stocks.fish, fic, res_bar(t.stocks.fish, fic)));
+            p.push(format!("{} 🌾 food  {:>5.0}/{:.0} [{}]", res_color(t.stocks.food, fc), t.stocks.food, fc, res_bar(t.stocks.food, fc)));
+            p.push(format!("{} 💧 water {:>5.0}/{:.0} [{}]", res_color(t.stocks.water, wc), t.stocks.water, wc, res_bar(t.stocks.water, wc)));
+            p.push(format!("{} ⛏ ore   {:>5.0}/{:.0} [{}]", res_color(t.stocks.ore, oc), t.stocks.ore, oc, res_bar(t.stocks.ore, oc)));
+            p.push(format!("{} 🥩 meat  {:>5.0}/{:.0} [{}]", res_color(t.stocks.meat, mc), t.stocks.meat, mc, res_bar(t.stocks.meat, mc)));
+            p.push(format!("{} 💰 gold  {:>5.0}/{:.0} [{}]", res_color(t.stocks.gold, gc), t.stocks.gold, gc, res_bar(t.stocks.gold, gc)));
+            p.push(format!("{} 🐟 fish  {:>5.0}/{:.0} [{}]", res_color(t.stocks.fish, fic), t.stocks.fish, fic, res_bar(t.stocks.fish, fic)));
             p.push(String::new());
 
             p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
