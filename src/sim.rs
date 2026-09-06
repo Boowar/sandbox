@@ -1739,7 +1739,7 @@ impl Sim {
                         && !has(BuildingKind::Temple) && !need(BuildingKind::Temple)
                     {
                         t.queue.push((BuildingKind::Temple, 0.0));
-                    } else if t.stocks.food > stock_cap(&t.built, ResourceKind::Food) * 0.75
+                    } else if t.stocks.food > stock_cap(&t.built, ResourceKind::Food) * 0.60
                         && !has(BuildingKind::Warehouse) && !need(BuildingKind::Warehouse)
                     {
                         t.queue.push((BuildingKind::Warehouse, 0.0));
