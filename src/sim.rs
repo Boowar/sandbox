@@ -1,5 +1,6 @@
 pub const W: usize = 150;
 pub const H: usize = 96;
+pub const CELL: f64 = 8.0;
 pub const TICK_DT: f64 = 0.08;
 
 const FOOD_MAX: f32 = 10.0;

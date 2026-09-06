@@ -1,8 +1,7 @@
-use crate::sim::{Role, Species, Season, Terrain, TownIdea, Weather, DAY_LEN, H, Sim, W};
+use crate::sim::{Role, Species, Season, Terrain, TownIdea, Weather, DAY_LEN, H, CELL, Sim, W};
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
-const CELL: f64 = 8.0;
 const ART: usize = 4;
 const PX: usize = 2;
 const PW: usize = W * ART * PX;

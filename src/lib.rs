@@ -12,7 +12,8 @@ use web_sys::{
     PointerEvent, Url, WheelEvent,
 };
 
-const CELL: f64 = 8.0;
+use sim::CELL;
+
 const BLESS_R: i32 = 3;
 const ZOOM_MIN: f64 = 0.5;
 const ZOOM_MAX: f64 = 8.0;
