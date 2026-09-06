@@ -288,13 +288,22 @@ impl App {
 
     fn save_to_local(&self) {
         let json = self.sim.borrow().save_json();
-        let window = web_sys::window().expect("no window");
-        let ls = window.local_storage().expect("no localStorage").expect("no localStorage");
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return,
+        };
+        let ls = match window.local_storage() {
+            Ok(Some(ls)) => ls,
+            _ => return,
+        };
         let _ = ls.set_item("sandbox_save", &json);
     }
 
     fn load_from_local(&mut self) -> bool {
-        let window = web_sys::window().expect("no window");
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return false,
+        };
         let ls = match window.local_storage() {
             Ok(Some(ls)) => ls,
             _ => return false,
@@ -316,7 +325,10 @@ impl App {
 
     fn download_save(&self) {
         let json = self.sim.borrow().save_json();
-        let window = web_sys::window().expect("no window");
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return,
+        };
         let arr = Uint8Array::new_with_byte_offset_and_length(
             &JsValue::from_str(&json),
             0,
@@ -324,19 +336,24 @@ impl App {
         );
         let bag = BlobPropertyBag::new();
         bag.set_type("application/json");
-        let blob = Blob::new_with_str_sequence_and_options(
-            &arr,
-            &bag,
-        )
-        .expect("blob");
-        let url = Url::create_object_url_with_blob(&blob).expect("url");
-        let a: HtmlAnchorElement = window
-            .document()
-            .expect("doc")
-            .create_element("a")
-            .expect("a")
-            .dyn_into()
-            .expect("dyn");
+        let blob = match Blob::new_with_str_sequence_and_options(&arr, &bag) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+        let url = match Url::create_object_url_with_blob(&blob) {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+        let a: HtmlAnchorElement = match window.document() {
+            Some(doc) => match doc.create_element("a") {
+                Ok(el) => match el.dyn_into() {
+                    Ok(a) => a,
+                    Err(_) => return,
+                },
+                Err(_) => return,
+            },
+            None => return,
+        };
         a.set_href(&url);
         a.set_download("sandbox_save.json");
         a.click();
