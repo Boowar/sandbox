@@ -866,8 +866,8 @@ for a in &sim.animals {
         let ty = sim.towns[c.target].y as f64 * CELL + 4.0;
         let cx = c.x as f64 * CELL + 4.0;
         let cy = c.y as f64 * CELL + 4.0;
-        ctx.set_stroke_style_str("rgba(232,214,120,0.25)");
-        ctx.set_line_width(0.5);
+        ctx.set_stroke_style_str("rgba(232,214,120,0.5)");
+        ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.move_to(cx, cy);
         ctx.line_to(tx, ty);
