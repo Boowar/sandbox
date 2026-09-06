@@ -902,7 +902,7 @@ for a in &sim.animals {
         }
     }
 
-    if sim.season == Season::Winter {
+    if sim.season == Season::Winter && sim.weather != Weather::Heat {
         let ph = tick as usize % 11;
         ctx.set_fill_style_str("rgba(240,245,255,0.12)");
         for i in 0..120usize {
