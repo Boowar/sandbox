@@ -607,6 +607,8 @@ impl App {
             "q" | "Q" | "й" | "Й" => self.build(sim::BuildingKind::Library),
             "e" | "E" | "у" | "У" => self.build(sim::BuildingKind::Warehouse),
             "f" | "F" | "а" | "А" => self.build(sim::BuildingKind::Sawmill),
+            "g" | "G" | "п" | "П" => self.build(sim::BuildingKind::Fence),
+            "o" | "O" | "щ" | "Щ" => self.build(sim::BuildingKind::Outpost),
             "c" | "C" | "с" | "С" => self.breed_cows(),
             "r" | "R" | "к" | "К" => self.new_world(),
             "F5" => self.save_to_local(),
@@ -883,6 +885,12 @@ pub fn start() -> Result<(), JsValue> {
     })?;
     bind_click(&document.get_element_by_id("btnSawmill").ok_or("no btnSawmill")?, &app, |a| {
         a.build(sim::BuildingKind::Sawmill)
+    })?;
+    bind_click(&document.get_element_by_id("btnFence").ok_or("no btnFence")?, &app, |a| {
+        a.build(sim::BuildingKind::Fence)
+    })?;
+    bind_click(&document.get_element_by_id("btnOutpost").ok_or("no btnOutpost")?, &app, |a| {
+        a.build(sim::BuildingKind::Outpost)
     })?;
     bind_click(&document.get_element_by_id("btnCow").ok_or("no btnCow")?, &app, |a| {
         a.breed_cows()

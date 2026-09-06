@@ -100,6 +100,11 @@ const WAREHOUSE_WOOD_CAP: f32 = 30.0;
 const SAWMILL_COST: f32 = 35.0;
 const SAWMILL_WOOD_PER_TICK: f32 = 0.8;
 const FARM_FOOD_PER_TICK: f32 = 1.2;
+const FENCE_COST: f32 = 15.0;
+const FENCE_DEFENSE: f32 = 0.05;
+const FENCE_RADIUS: i32 = 3;
+const OUTPOST_COST: f32 = 60.0;
+const OUTPOST_RADIUS: i32 = 5;
 const TRADE_POST_COST: f32 = 40.0;
 const TRADE_TRICKLE: f32 = 0.03;
 const AUTO_TRADEPOST_FOOD: f32 = 80.0;
@@ -440,6 +445,8 @@ pub enum BuildingKind {
     Temple,
     Warehouse,
     Sawmill,
+    Fence,
+    Outpost,
 }
 
 impl BuildingKind {
@@ -459,6 +466,8 @@ impl BuildingKind {
             BuildingKind::Temple => TEMPLE_COST,
             BuildingKind::Warehouse => WAREHOUSE_COST,
             BuildingKind::Sawmill => SAWMILL_COST,
+            BuildingKind::Fence => FENCE_COST,
+            BuildingKind::Outpost => OUTPOST_COST,
         }
     }
 
@@ -478,6 +487,8 @@ impl BuildingKind {
             BuildingKind::Temple => 3.0,
             BuildingKind::Warehouse => 1.5,
             BuildingKind::Sawmill => 0.8,
+            BuildingKind::Fence => 0.5,
+            BuildingKind::Outpost => 2.0,
         }
     }
 }
@@ -1751,6 +1762,10 @@ impl Sim {
                         && !has(BuildingKind::Warehouse) && !need(BuildingKind::Warehouse)
                     {
                         t.queue.push((BuildingKind::Warehouse, 0.0));
+                    } else if t.at_war && !has(BuildingKind::Fence) && !need(BuildingKind::Fence) {
+                        t.queue.push((BuildingKind::Fence, 0.0));
+                    } else if t.at_war && pop_ti >= AUTO_UNI_POP && !has(BuildingKind::Outpost) && !need(BuildingKind::Outpost) {
+                        t.queue.push((BuildingKind::Outpost, 0.0));
                     } else if pop_ti >= t.cap && has(BuildingKind::House) && !need(BuildingKind::House) {
                         t.queue.push((BuildingKind::House, 0.0));
                     }
@@ -1819,7 +1834,13 @@ impl Sim {
 
     pub fn settlement_radius(&self, ti: usize) -> i32 {
         let buildings = self.towns[ti].built.len() as i32;
-        5 + buildings * 2
+        let fence_extra = self.towns[ti].built.iter()
+            .filter(|b| **b == BuildingKind::Fence)
+            .count() as i32 * FENCE_RADIUS;
+        let outpost_extra = self.towns[ti].built.iter()
+            .filter(|b| **b == BuildingKind::Outpost)
+            .count() as i32 * OUTPOST_RADIUS;
+        5 + buildings * 2 + fence_extra + outpost_extra
     }
 
     pub fn recalc_territory(&mut self) {
@@ -4229,6 +4250,7 @@ impl Sim {
             match k {
                 BuildingKind::Wall => b += DEFENSE_WALL_BONUS,
                 BuildingKind::Barracks => b += DEFENSE_BARRACKS_BONUS,
+                BuildingKind::Fence => b += FENCE_DEFENSE,
                 _ => {}
             }
         }
@@ -4260,6 +4282,17 @@ impl Sim {
             t.stocks.food -= take_f;
             let take_w = t.stocks.water.min(2.0);
             t.stocks.water -= take_w;
+
+            let attacker_home = self.agents[i].home;
+            let my_empire = self.towns[attacker_home].empire;
+            let defender_pop = self.agents.iter().filter(|a| a.home == j && !a.raider).count();
+            let attacker_raiders_near = self.agents.iter()
+                .filter(|a| a.home == attacker_home && a.raider
+                    && (a.x - ex).abs() <= 4 && (a.y - ey).abs() <= 4)
+                .count();
+            if defender_pop == 0 && attacker_raiders_near >= 2 {
+                self.capture_town(j, my_empire);
+            }
         }
         for k in 0..self.agents.len() {
             if k == i {
@@ -4286,6 +4319,31 @@ impl Sim {
                 return;
             }
         }
+    }
+
+    fn capture_town(&mut self, town_idx: usize, new_empire: Option<usize>) {
+        let old_empire = self.towns[town_idx].empire;
+        if let Some(oe) = old_empire {
+            if let Some(emp) = self.empires.get_mut(oe) {
+                emp.members.retain(|&m| m != town_idx);
+            }
+        }
+        self.towns[town_idx].empire = new_empire;
+        if let Some(ne) = new_empire {
+            if let Some(emp) = self.empires.get_mut(ne) {
+                emp.members.push(town_idx);
+            }
+        }
+        self.towns[town_idx].at_war = false;
+        self.towns[town_idx].raiders = 0;
+        self.towns[town_idx].enemy = None;
+        for a in self.agents.iter_mut() {
+            if a.home == town_idx {
+                a.raider = false;
+                a.target_town = None;
+            }
+        }
+        self.recalc_territory();
     }
 
     fn retrain_roles(&mut self) {
@@ -6717,5 +6775,38 @@ fn marriages_form_and_cheapen_births() {
             "should be Village or City at pop >= 31, got {:?}",
             s.towns[0].tier
         );
+    }
+
+    #[test]
+    fn fence_extends_territory() {
+        let mut s = Sim::new(1);
+        s.recalc_territory();
+        let r_before = s.settlement_radius(0);
+        s.towns[0].built.push(BuildingKind::Fence);
+        s.recalc_territory();
+        let r_after = s.settlement_radius(0);
+        assert!(r_after >= r_before + FENCE_RADIUS,
+            "Fence should add {} radius, got {} from {}", FENCE_RADIUS, r_after, r_before);
+    }
+
+    #[test]
+    fn outpost_extends_territory() {
+        let mut s = Sim::new(1);
+        s.recalc_territory();
+        let r_before = s.settlement_radius(0);
+        s.towns[0].built.push(BuildingKind::Outpost);
+        s.recalc_territory();
+        let r_after = s.settlement_radius(0);
+        assert!(r_after >= r_before + OUTPOST_RADIUS,
+            "Outpost should add {} radius, got {} from {}", OUTPOST_RADIUS, r_after, r_before);
+    }
+
+    #[test]
+    fn fence_adds_defense() {
+        let mut s = Sim::new(1);
+        let d_before = s.defense_bonus(0);
+        s.towns[0].built.push(BuildingKind::Fence);
+        let d_after = s.defense_bonus(0);
+        assert!(d_after > d_before, "Fence should add defense: {} > {}", d_after, d_before);
     }
 }

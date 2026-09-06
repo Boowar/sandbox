@@ -506,6 +506,21 @@ fn draw_building(
             ctx.set_fill_style_str("rgb(80,60,30)");
             ctx.fill_rect(px + 2.0, py + 3.0, 2.0, 2.0);
         }
+        crate::sim::BuildingKind::Fence => {
+            ctx.set_fill_style_str("rgb(160,120,60)");
+            ctx.fill_rect(px, py + 2.0, 6.0, 1.0);
+            ctx.fill_rect(px, py + 4.0, 6.0, 1.0);
+            ctx.fill_rect(px + 0.0, py + 1.0, 1.0, 4.0);
+            ctx.fill_rect(px + 3.0, py + 1.0, 1.0, 4.0);
+        }
+        crate::sim::BuildingKind::Outpost => {
+            ctx.set_fill_style_str("rgb(120,100,70)");
+            ctx.fill_rect(px + 1.0, py + 1.0, 4.0, 4.0);
+            ctx.set_fill_style_str("rgb(90,75,50)");
+            ctx.fill_rect(px + 2.0, py, 2.0, 1.0);
+            ctx.set_fill_style_str("rgb(160,130,80)");
+            ctx.fill_rect(px + 2.0, py + 2.0, 2.0, 1.0);
+        }
     }
 }
 
@@ -1279,6 +1294,8 @@ for a in &sim.animals {
             let temple = build_counts(crate::sim::BuildingKind::Temple);
             let warehouse = build_counts(crate::sim::BuildingKind::Warehouse);
             let sawmill = build_counts(crate::sim::BuildingKind::Sawmill);
+            let fence = build_counts(crate::sim::BuildingKind::Fence);
+            let outpost = build_counts(crate::sim::BuildingKind::Outpost);
             let bless_name = match t.blessing {
                 crate::sim::Blessing::Fertility => "плодородие",
                 crate::sim::Blessing::Abundance => "изобилие",
@@ -1310,6 +1327,8 @@ for a in &sim.animals {
                     crate::sim::BuildingKind::Temple => "🛕",
                     crate::sim::BuildingKind::Warehouse => "📦",
                     crate::sim::BuildingKind::Sawmill => "🪚",
+                    crate::sim::BuildingKind::Fence => "🪵",
+                    crate::sim::BuildingKind::Outpost => "🗼",
                 }).collect::<Vec<_>>().join("")
             };
             let families: Vec<_> = sim.families.iter()
@@ -1362,7 +1381,7 @@ for a in &sim.animals {
             p.push(String::new());
 
             p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
-            p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{} 📦{} 🪚{}", barracks, uni, smith, lib, temple, warehouse, sawmill));
+            p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{} 📦{} 🪚{} 🪵{} 🗼{}", barracks, uni, smith, lib, temple, warehouse, sawmill, fence, outpost));
             if !t.queue.is_empty() {
                 let current = &t.queue[0];
                 let pct = (current.1 / current.0.cost() * 100.0) as u32;
@@ -1376,7 +1395,9 @@ for a in &sim.animals {
                         crate::sim::BuildingKind::University => "🎓", crate::sim::BuildingKind::Smithy => "🔨",
                         crate::sim::BuildingKind::Library => "📚", crate::sim::BuildingKind::Temple => "🛕",
                         crate::sim::BuildingKind::Warehouse => "📦",
-                    crate::sim::BuildingKind::Sawmill => "🪚",
+                        crate::sim::BuildingKind::Sawmill => "🪚",
+                        crate::sim::BuildingKind::Fence => "🪵",
+                        crate::sim::BuildingKind::Outpost => "🗼",
                     }).collect();
                     p.push(format!("  .Queue: {}", rest.join(" ")));
                 }
@@ -1396,6 +1417,8 @@ for a in &sim.animals {
             if temple > 0 { p.push(format!("  🛕 Temple   ({}) priests, +faith", temple)); }
             if warehouse > 0 { p.push(format!("  📦 Warehouse ({}) +40 food/water, +25 ore", warehouse)); }
             if sawmill > 0 { p.push(format!("  🪚 Sawmill   ({}) +0.8 wood/tick", sawmill)); }
+            if fence > 0 { p.push(format!("  🪵 Fence     ({}) +0.05 def, +3 territory", fence)); }
+            if outpost > 0 { p.push(format!("  🗼 Outpost   ({}) +5 territory", outpost)); }
             p.push(String::new());
             let mut role_line = String::new();
             for (r, c) in &role_counts {
