@@ -177,7 +177,7 @@ const FOUND_MIN_WATER: f32 = 140.0;
 const FOUND_EPOCH_P: u32 = 5;
 const FOUND_RADIUS_MIN: i32 = 12;
 const FOUND_RADIUS_MAX: i32 = 40;
-const FOUND_COLONY_POP: usize = 4;
+const FOUND_COLONY_POP: usize = 6;
 const MAX_TOWNS: usize = 10;
 const TOWN_WASTE_NEED: u64 = 3;
 
@@ -3362,7 +3362,7 @@ impl Sim {
         self.towns.push(Settlement {
             x,
             y,
-            stocks: Stock { food: 120.0, water: 120.0, ore: 40.0, meat: 20.0, gold: 0.0, fish: 0.0, wood: 0.0 },
+            stocks: Stock { food: 200.0, water: 200.0, ore: 60.0, meat: 30.0, gold: 0.0, fish: 0.0, wood: 50.0 },
             r,
             g,
             b,
