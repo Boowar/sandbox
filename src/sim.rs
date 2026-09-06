@@ -458,6 +458,33 @@ pub struct Stock {
     pub fish: f32,
 }
 
+impl Stock {
+    pub fn get(&self, k: ResourceKind) -> f32 {
+        match k {
+            ResourceKind::Food => self.food,
+            ResourceKind::Water => self.water,
+            ResourceKind::Ore => self.ore,
+            ResourceKind::Meat => self.meat,
+            ResourceKind::Gold => self.gold,
+            ResourceKind::Fish => self.fish,
+        }
+    }
+    pub fn set(&mut self, k: ResourceKind, v: f32) {
+        match k {
+            ResourceKind::Food => self.food = v,
+            ResourceKind::Water => self.water = v,
+            ResourceKind::Ore => self.ore = v,
+            ResourceKind::Meat => self.meat = v,
+            ResourceKind::Gold => self.gold = v,
+            ResourceKind::Fish => self.fish = v,
+        }
+    }
+    pub fn add_clamped(&mut self, k: ResourceKind, amount: f32, cap: f32) {
+        let cur = self.get(k);
+        self.set(k, clamp_stock(cur, amount, cap));
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Cell {
     pub terrain: Terrain,
@@ -1306,13 +1333,8 @@ impl Sim {
             }
             let st = &mut self.towns[ti].stocks;
             for (k, q) in &goods {
-                match k {
-                    ResourceKind::Food => st.food -= q,
-                    ResourceKind::Ore => st.ore -= q,
-                    ResourceKind::Meat => st.meat -= q,
-                    ResourceKind::Water => st.water -= q,
-                    ResourceKind::Gold => {}
-                    ResourceKind::Fish => st.fish -= q,
+                if *k != ResourceKind::Gold {
+                    st.set(*k, st.get(*k) - q);
                 }
             }
             let mut best: Option<usize> = None;
@@ -1380,14 +1402,7 @@ impl Sim {
                 let st = &mut self.towns[target].stocks;
                 for (k, q) in &goods {
                     let cap = stock_cap(&target_built, *k);
-                    match k {
-                        ResourceKind::Food => st.food = clamp_stock(st.food, *q, cap),
-                        ResourceKind::Water => st.water = clamp_stock(st.water, *q, cap),
-                        ResourceKind::Ore => st.ore = clamp_stock(st.ore, *q, cap),
-                        ResourceKind::Meat => st.meat = clamp_stock(st.meat, *q, cap),
-                        ResourceKind::Gold => {}
-                        ResourceKind::Fish => st.fish = clamp_stock(st.fish, *q, cap),
-                    }
+                    st.add_clamped(*k, *q, cap);
                 }
             } else {
                 let (nx, ny) = self.caravan_step(x, y, tx, ty);
