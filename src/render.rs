@@ -1358,13 +1358,13 @@ for a in &sim.animals {
             if houses > 0 { p.push(format!("  🏠 House    ({}) +8 pop cap", houses)); }
             if wells > 0 { p.push(format!("  ⛲ Well     ({}) +1.0 water/tick", wells)); }
             if farms > 0 { p.push(format!("  🌾 Farm     ({}) feeds town, fields", farms)); }
-            if posts > 0 { p.push(format!("  🏦 Trade    ({}) +1.0 gold/tick", posts)); }
+            if posts > 0 { p.push(format!("  🏦 Trade    ({}) +0.03 gold/tick", posts)); }
             if clinic > 0 { p.push(format!("  ⛑ Clinic   ({}) cures plague", clinic)); }
-            if wall > 0 { p.push(format!("  ⛋ Wall     ({}) +2 defense each", wall)); }
+            if wall > 0 { p.push(format!("  ⛋ Wall     ({}) +0.15 defense each", wall)); }
             if barracks > 0 { p.push(format!("  ⛩ Barracks ({}) guards, fights war", barracks)); }
-            if uni > 0 { p.push(format!("  🎓 Uni      ({}) +0.08 sci/tick", uni)); }
-            if smith > 0 { p.push(format!("  🔨 Smithy   ({}) +20% build speed", smith)); }
-            if lib > 0 { p.push(format!("  📚 Library  ({}) +0.04 sci/tick", lib)); }
+            if uni > 0 { p.push(format!("  🎓 Uni      ({}) +4.0 sci/tick", uni)); }
+            if smith > 0 { p.push(format!("  🔨 Smithy   ({}) +1 build/tick", smith)); }
+            if lib > 0 { p.push(format!("  📚 Library  ({}) +1.5 sci/tick", lib)); }
             if temple > 0 { p.push(format!("  🛕 Temple   ({}) priests, +faith", temple)); }
             if warehouse > 0 { p.push(format!("  📦 Warehouse ({}) +40 food/water, +25 ore", warehouse)); }
             if sawmill > 0 { p.push(format!("  🪚 Sawmill   ({}) +0.8 wood/tick", sawmill)); }
