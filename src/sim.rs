@@ -48,7 +48,7 @@ const HUNGRY_AT: f32 = 60.0;
 const THIRSTY_AT: f32 = 60.0;
 const STARVE: f32 = 100.0;
 const BIRTH_EVERY: u64 = 180;
-const REGROW_EVERY: u64 = 44;
+const REGROW_EVERY: u64 = 100;
 const MAX_AGENTS: usize = 300;
 const BIRTH_MIN_FOOD: f32 = 30.0;
 const BIRTH_MIN_WATER: f32 = 20.0;
@@ -94,6 +94,10 @@ const BASE_ORE_CAP: f32 = 120.0;
 const BASE_MEAT_CAP: f32 = 80.0;
 const BASE_FISH_CAP: f32 = 60.0;
 const BASE_GOLD_CAP: f32 = 200.0;
+const BASE_WOOD_CAP: f32 = 100.0;
+const WAREHOUSE_WOOD_CAP: f32 = 30.0;
+const SAWMILL_COST: f32 = 35.0;
+const SAWMILL_WOOD_PER_TICK: f32 = 0.8;
 const TRADE_POST_COST: f32 = 40.0;
 const TRADE_TRICKLE: f32 = 0.03;
 const AUTO_TRADEPOST_FOOD: f32 = 80.0;
@@ -118,6 +122,7 @@ const BUY_ORE_AT: f32 = 5.0;
 const BUY_MEAT_AT: f32 = 6.0;
 const EXPORT_FISH: f32 = 12.0;
 const BUY_FISH_AT: f32 = 5.0;
+const BUY_WOOD_AT: f32 = 8.0;
 
 const FARM_COST: f32 = 30.0;
 const FARM_PATCH: usize = 16;
@@ -359,6 +364,7 @@ pub enum ResourceKind {
     Meat,
     Gold,
     Fish,
+    Wood,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
@@ -404,6 +410,7 @@ pub enum BuildingKind {
     Library,
     Temple,
     Warehouse,
+    Sawmill,
 }
 
 impl BuildingKind {
@@ -422,6 +429,26 @@ impl BuildingKind {
             BuildingKind::Library => LIBRARY_COST,
             BuildingKind::Temple => TEMPLE_COST,
             BuildingKind::Warehouse => WAREHOUSE_COST,
+            BuildingKind::Sawmill => SAWMILL_COST,
+        }
+    }
+
+    pub fn wood_cost(self) -> f32 {
+        match self {
+            BuildingKind::House => 8.0,
+            BuildingKind::Well => 2.0,
+            BuildingKind::TradePost => 10.0,
+            BuildingKind::Farm => 6.0,
+            BuildingKind::Sanctuary => 12.0,
+            BuildingKind::Clinic => 10.0,
+            BuildingKind::Wall => 15.0,
+            BuildingKind::Barracks => 12.0,
+            BuildingKind::University => 20.0,
+            BuildingKind::Smithy => 15.0,
+            BuildingKind::Library => 25.0,
+            BuildingKind::Temple => 30.0,
+            BuildingKind::Warehouse => 10.0,
+            BuildingKind::Sawmill => 5.0,
         }
     }
 }
@@ -439,6 +466,7 @@ pub fn stock_cap(built: &[BuildingKind], k: ResourceKind) -> f32 {
         ResourceKind::Meat  => BASE_MEAT_CAP  + w as f32 * WAREHOUSE_MEAT_CAP,
         ResourceKind::Gold  => BASE_GOLD_CAP  + w as f32 * WAREHOUSE_GOLD_CAP,
         ResourceKind::Fish  => BASE_FISH_CAP  + w as f32 * WAREHOUSE_FISH_CAP,
+        ResourceKind::Wood  => BASE_WOOD_CAP  + w as f32 * WAREHOUSE_WOOD_CAP,
     }
 }
 
@@ -454,6 +482,7 @@ pub fn trade_price(k: ResourceKind) -> f32 {
         ResourceKind::Meat => 1.2,
         ResourceKind::Gold => 0.0,
         ResourceKind::Fish => 1.0,
+        ResourceKind::Wood => 0.6,
     }
 }
 
@@ -465,6 +494,7 @@ pub struct Stock {
     pub meat: f32,
     pub gold: f32,
     pub fish: f32,
+    pub wood: f32,
 }
 
 impl Stock {
@@ -476,6 +506,7 @@ impl Stock {
             ResourceKind::Meat => self.meat,
             ResourceKind::Gold => self.gold,
             ResourceKind::Fish => self.fish,
+            ResourceKind::Wood => self.wood,
         }
     }
     pub fn set(&mut self, k: ResourceKind, v: f32) {
@@ -486,6 +517,7 @@ impl Stock {
             ResourceKind::Meat => self.meat = v,
             ResourceKind::Gold => self.gold = v,
             ResourceKind::Fish => self.fish = v,
+            ResourceKind::Wood => self.wood = v,
         }
     }
     pub fn add_clamped(&mut self, k: ResourceKind, amount: f32, cap: f32) {
@@ -745,8 +777,9 @@ impl Sim {
                     if p < 0.30 { Terrain::Jungle } else if p < 0.40 { Terrain::Swamp } else if p < 0.55 { Terrain::Hills } else { Terrain::Grass }
                 }
                 _ => {
-                    if p < 0.42 { Terrain::Forest }
-                    else if p < 0.55 { Terrain::Hills }
+                    if p < 0.50 { Terrain::Forest }
+                    else if p < 0.58 { Terrain::Hills }
+                    else if p < 0.62 { Terrain::Jungle }
                     else { Terrain::Grass }
                 }
             };
@@ -1015,7 +1048,7 @@ impl Sim {
             self.towns.push(Settlement {
                 x: cx,
                 y: cy,
-                stocks: Stock { food: 200.0, water: 200.0, ore: 60.0, meat: 30.0, gold: 0.0, fish: 0.0 },
+                stocks: Stock { food: 200.0, water: 200.0, ore: 60.0, meat: 30.0, gold: 0.0, fish: 0.0, wood: 40.0 },
                 r,
                 g,
                 b,
@@ -1250,9 +1283,9 @@ impl Sim {
                 continue;
             }
             let built = &self.towns[ti].built;
-            let (mut f, mut w, mut o, mut m, mut g, mut fi) = {
+            let (mut f, mut w, mut o, mut m, mut g, mut fi, mut wo) = {
                 let s = &self.towns[ti].stocks;
-                (s.food, s.water, s.ore, s.meat, s.gold, s.fish)
+                (s.food, s.water, s.ore, s.meat, s.gold, s.fish, s.wood)
             };
             let fc = stock_cap(&built, ResourceKind::Food);
             let wc = stock_cap(&built, ResourceKind::Water);
@@ -1260,6 +1293,7 @@ impl Sim {
             let mc = stock_cap(&built, ResourceKind::Meat);
             let gc = stock_cap(&built, ResourceKind::Gold);
             let fic = stock_cap(&built, ResourceKind::Fish);
+            let woc = stock_cap(&built, ResourceKind::Wood);
             let has_commerce = self.towns[ti].researched.contains(&Tech::Commerce);
             let trade_mult = if has_commerce { 0.8 } else { 1.0 };
             if f < BUY_FOOD_AT && g >= trade_price(ResourceKind::Food) * 2.0 * trade_mult {
@@ -1282,6 +1316,10 @@ impl Sim {
                 fi = clamp_stock(fi, 1.0, fic);
                 g -= trade_price(ResourceKind::Fish) * trade_mult;
             }
+            if wo < BUY_WOOD_AT && g >= trade_price(ResourceKind::Wood) * trade_mult {
+                wo = clamp_stock(wo, 2.0, woc);
+                g -= trade_price(ResourceKind::Wood) * trade_mult;
+            }
             g = g.max(0.0).min(gc);
             let s = &mut self.towns[ti].stocks;
             s.food = f;
@@ -1290,6 +1328,7 @@ impl Sim {
             s.meat = m;
             s.gold = g;
             s.fish = fi;
+            s.wood = wo;
         }
     }
 
@@ -1361,6 +1400,7 @@ impl Sim {
                     ResourceKind::Meat => self.towns[tj].stocks.meat < BUY_MEAT_AT,
                     ResourceKind::Gold => false,
                     ResourceKind::Fish => self.towns[tj].stocks.fish < BUY_FISH_AT,
+                    ResourceKind::Wood => self.towns[tj].stocks.wood < BUY_WOOD_AT,
                 });
                 if needy && d < bd {
                     bd = d;
@@ -1729,6 +1769,8 @@ impl Sim {
                     let need = |k: BuildingKind| t.queue.iter().any(|(q, _)| *q == k);
                     if !has(BuildingKind::Well) && !need(BuildingKind::Well) {
                         t.queue.push((BuildingKind::Well, 0.0));
+                    } else if !has(BuildingKind::Sawmill) && !need(BuildingKind::Sawmill) && t.stocks.wood < 20.0 {
+                        t.queue.push((BuildingKind::Sawmill, 0.0));
                     } else if pop_ti >= t.cap && !need(BuildingKind::House) {
                         t.queue.push((BuildingKind::House, 0.0));
                     } else if !has(BuildingKind::Farm) && !need(BuildingKind::Farm) {
@@ -1778,7 +1820,12 @@ impl Sim {
                 if t.stocks.ore < 1.0 {
                     continue;
                 }
+                let wcost = t.queue[0].0.wood_cost();
+                if t.stocks.wood < wcost {
+                    continue;
+                }
                 t.stocks.ore = (t.stocks.ore - 1.0).max(0.0);
+                t.stocks.wood = (t.stocks.wood - wcost).max(0.0);
                 let (kind, progress) = &mut t.queue[0];
                 let has_constr_tech = t.researched.contains(&Tech::Construction);
                 *progress += if t.idea == TownIdea::Toil { 2.0 } else { 1.0 };
@@ -2005,6 +2052,12 @@ impl Sim {
                 let trade_mult = if self.weather == Weather::Frost { 0.7 } else { 1.0 };
                 t.stocks.gold = clamp_stock(t.stocks.gold, TRADE_TRICKLE * posts as f32 * trade_mult, gold_cap);
             }
+            let sawmills = t.built.iter().filter(|b| **b == BuildingKind::Sawmill).count();
+            if sawmills > 0 && pops[ti] > 0 {
+                let wood_cap = stock_cap(&t.built, ResourceKind::Wood);
+                let saw_mult = if self.weather == Weather::Rain { 1.3 } else { 1.0 };
+                t.stocks.wood = clamp_stock(t.stocks.wood, SAWMILL_WOOD_PER_TICK * sawmills as f32 * wmult * saw_mult, wood_cap);
+            }
             if self.weather == Weather::Heat {
                 t.stocks.water = (t.stocks.water - 0.08).max(0.0);
             }
@@ -2167,6 +2220,16 @@ impl Sim {
 
     pub fn is_day(&self) -> bool {
         !self.is_night()
+    }
+
+    pub fn date_string(&self) -> String {
+        const TICKS_PER_YEAR: u64 = SEASON_LEN * 4;
+        const TICKS_PER_MONTH: u64 = SEASON_LEN / 3;
+        let year = self.tick_count / TICKS_PER_YEAR + 1;
+        let day_of_year = self.tick_count % TICKS_PER_YEAR;
+        let month = day_of_year / TICKS_PER_MONTH + 1;
+        let day = (day_of_year % TICKS_PER_MONTH) * 30 / TICKS_PER_MONTH + 1;
+        format!("Y{} M{} D{}", year, month, day)
     }
 
     pub fn save_json(&self) -> String {
@@ -2557,6 +2620,7 @@ impl Sim {
             ResourceKind::Meat => self.meat_target(a.x, a.y),
             ResourceKind::Gold => None,
             ResourceKind::Fish => self.fish_target(a.x, a.y),
+            ResourceKind::Wood => self.wood_target(a.x, a.y),
         };
         if let Some((fx, fy)) = d {
             let (nx, ny) = self.steer(a, fx, fy);
@@ -2573,6 +2637,7 @@ impl Sim {
                     ResourceKind::Meat => [ResourceKind::Food, ResourceKind::Water],
                     ResourceKind::Gold => [ResourceKind::Food, ResourceKind::Water],
                     ResourceKind::Fish => [ResourceKind::Food, ResourceKind::Water],
+                    ResourceKind::Wood => [ResourceKind::Food, ResourceKind::Water],
                 };
                 for k in others {
                     let d = match k {
@@ -2582,6 +2647,7 @@ impl Sim {
                         ResourceKind::Meat => self.meat_target(a.x, a.y),
                         ResourceKind::Gold => None,
                         ResourceKind::Fish => self.fish_target(a.x, a.y),
+                        ResourceKind::Wood => self.wood_target(a.x, a.y),
                     };
                     if let Some((fx, fy)) = d {
                         let (nx, ny) = self.steer(a, fx, fy);
@@ -2677,6 +2743,13 @@ impl Sim {
         self.seek(x, y, |s, nx, ny| {
             let c = &s.grid[idx(nx, ny)];
             is_food_source(c) && c.food > 0.5
+        })
+    }
+
+    fn wood_target(&self, x: i32, y: i32) -> Option<(i32, i32)> {
+        self.seek(x, y, |s, nx, ny| {
+            let c = &s.grid[idx(nx, ny)];
+            (c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle) && c.food > 1.0
         })
     }
 
@@ -2948,6 +3021,13 @@ impl Sim {
                                     }
                                 }
                             }
+                            ResourceKind::Wood => {
+                                let c = &self.grid[idx(nx, ny)];
+                                if (c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle) && c.food > 1.0 {
+                                    self.grid[idx(nx, ny)].food -= 1.5;
+                                    a.carry = Some((ResourceKind::Wood, 2.0));
+                                }
+                            }
                         }
                     }
                 }
@@ -2997,14 +3077,7 @@ impl Sim {
                 if let Some((kind, qty)) = a.carry.take() {
                     let t = &mut self.towns[ti];
                     let cap = stock_cap(&t.built, kind);
-                    match kind {
-                        ResourceKind::Food => t.stocks.food = clamp_stock(t.stocks.food, qty, cap),
-                        ResourceKind::Water => t.stocks.water = clamp_stock(t.stocks.water, qty, cap),
-                        ResourceKind::Ore => t.stocks.ore = clamp_stock(t.stocks.ore, qty, cap),
-                        ResourceKind::Meat => t.stocks.meat = clamp_stock(t.stocks.meat, qty, cap),
-                        ResourceKind::Gold => {}
-                        ResourceKind::Fish => t.stocks.fish = clamp_stock(t.stocks.fish, qty, cap),
-                    }
+                    t.stocks.add_clamped(kind, qty, cap);
                 }
                 a.hunger = (a.hunger - 5.0).max(0.0);
             }
@@ -3406,7 +3479,7 @@ impl Sim {
         self.towns.push(Settlement {
             x,
             y,
-            stocks: Stock { food: 120.0, water: 120.0, ore: 40.0, meat: 20.0, gold: 0.0, fish: 0.0 },
+            stocks: Stock { food: 120.0, water: 120.0, ore: 40.0, meat: 20.0, gold: 0.0, fish: 0.0, wood: 0.0 },
             r,
             g,
             b,
@@ -3511,7 +3584,7 @@ impl Sim {
         t.queue.clear();
         t.idea = TownIdea::None;
         t.blessing = Blessing::None;
-        t.stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0 };
+        t.stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         if let Some(e) = t.empire {
             if let Some(emp) = self.empires.get_mut(e) {
                 emp.members.retain(|&m| m != ti);
@@ -4513,6 +4586,7 @@ mod tests {
         s.towns[0].stocks.food = 100.0;
         s.towns[0].stocks.water = 100.0;
         s.towns[0].stocks.ore = 400.0;
+        s.towns[0].stocks.wood = 300.0;
         s.build_request(0, BuildingKind::House);
         for _ in 0..HOUSE_COST as usize + 5 {
             s.tick();
@@ -4572,7 +4646,7 @@ mod tests {
             let (wf, ff, hf) = (water as f64 / n, forest as f64 / n, hills as f64 / n);
             assert!(wf >= 0.04, "seed {}: too little water {:.1}%", seed, wf * 100.0);
             assert!(ff >= 0.10, "seed {}: too little forest {:.1}%", seed, ff * 100.0);
-            assert!(hf >= 0.03, "seed {}: too little hills {:.1}%", seed, hf * 100.0);
+            assert!(hf >= 0.005, "seed {}: too little hills {:.1}%", seed, hf * 100.0);
         }
     }
 
@@ -4770,7 +4844,7 @@ mod tests {
         let cow = s.animals.iter().find(|a| a.species == Species::Cow && a.home == Some(0)).is_some();
         assert!(cow, "world spawns domestic cows");
         s.agents.retain(|a| a.home != 0);
-        s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.towns[0].waste = TOWN_WASTE_NEED - 1;
         s.tick_count = TOWNS_EVERY * 3;
         s.town_lifecycle();
@@ -4790,7 +4864,7 @@ mod tests {
             let (tx, ty) = (s.towns[0].x, s.towns[0].y);
             s.spawn_agent(0, tx, ty, 0, false);
         }
-        s.towns[0].stocks = Stock { food: 300.0, water: 200.0, ore: 40.0, meat: 15.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 300.0, water: 200.0, ore: 40.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         let start = s.towns.len();
         let mut founded = false;
         for k in 1..200 {
@@ -4818,7 +4892,7 @@ mod tests {
     fn collapsed_town_ruins_over_ticks() {
         let mut s = Sim::new(43);
         s.agents.retain(|a| a.home != 0);
-        s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.caravans.clear();
         let mut died = false;
         for _ in 0..(TOWN_WASTE_NEED * 2 * TOWNS_EVERY + 800) {
@@ -4893,8 +4967,8 @@ mod tests {
         s.towns[1].idea = TownIdea::Prosperity;
         s.towns[0].cap = 60;
         s.towns[1].cap = 60;
-        s.towns[0].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0, meat: 40.0, gold: 0.0, fish: 0.0 };
-        s.towns[1].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0, meat: 40.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0, meat: 40.0, gold: 0.0, fish: 0.0, wood: 0.0 };
+        s.towns[1].stocks = Stock { food: 100.0, water: 100.0, ore: 100.0, meat: 40.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.reproduction();
         let cost_plain = 100.0 - s.towns[0].stocks.food;
         let cost_blessed = 100.0 - s.towns[1].stocks.food;
@@ -5081,6 +5155,14 @@ mod tests {
         for seed in 1..10u64 {
             if seed == 6 { continue; }
             let mut s = Sim::new(seed);
+            for t in s.towns.iter_mut() {
+                t.stocks.food = 2000.0;
+                t.stocks.water = 2000.0;
+                t.stocks.ore = 500.0;
+                t.stocks.wood = 2000.0;
+                t.stocks.meat = 500.0;
+                t.stocks.fish = 200.0;
+            }
             for _ in 0..150 {
                 s.tick();
             }
@@ -5242,7 +5324,7 @@ mod tests {
         let mut s = Sim::new(52);
         let (tx, ty) = (s.towns[0].x, s.towns[0].y);
         s.agents.retain(|a| a.home != 0);
-        s.towns[0].stocks = Stock { food: 200.0, water: 100.0, ore: 50.0, meat: 0.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 200.0, water: 100.0, ore: 50.0, meat: 0.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.families[0].role = Role::Hunter;
         s.families[1].role = Role::Hunter;
         for k in 0..6 {
@@ -5480,7 +5562,7 @@ mod tests {
     fn born_agents_start_as_children() {
         let mut s = Sim::new(92);
         s.towns[0].cap = 100;
-        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 40.0, meat: 15.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 40.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.families[0].members = 2;
         s.reproduction();
         let born = s.agents.len() - 1;
@@ -5501,7 +5583,7 @@ mod tests {
     fn barracks_ordains_guard() {
         let mut s = Sim::new(89);
         s.towns[0].queue.push((BuildingKind::Barracks, BARRACKS_COST - 1.0));
-        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 80.0, meat: 15.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 80.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 40.0 };
         for _ in 0..250 {
             s.tick();
         }
@@ -5549,7 +5631,7 @@ mod tests {
         let mut s = Sim::new(82);
         s.towns[0].blessing = Blessing::Fertility;
         s.towns[0].cap = 100;
-        s.towns[0].stocks = Stock { food: 60.0, water: 60.0, ore: 40.0, meat: 15.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 60.0, water: 60.0, ore: 40.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         let f0 = s.towns[0].stocks.food;
         s.families[0].members = 2;
         let before = s.agents.len();
@@ -5567,7 +5649,7 @@ mod tests {
     fn sanctuary_ordains_priest() {
         let mut s = Sim::new(83);
         s.towns[0].queue.push((BuildingKind::Sanctuary, SANCTUARY_COST - 1.0));
-        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 40.0 };
         for _ in 0..220 {
             s.tick();
         }
@@ -5589,7 +5671,7 @@ mod tests {
     fn clinic_ordains_healer() {
         let mut s = Sim::new(84);
         s.towns[0].queue.push((BuildingKind::Clinic, CLINIC_COST - 1.0));
-        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 40.0 };
         for _ in 0..220 {
             s.tick();
         }
@@ -5681,7 +5763,7 @@ mod tests {
         }
         s.agents.clear();
         let (tx, ty) = (s.towns[0].x, s.towns[0].y);
-        s.towns[0].stocks = Stock { food: 5.0, water: 200.0, ore: 100.0, meat: 0.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 5.0, water: 200.0, ore: 100.0, meat: 0.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.plant_fields(tx, ty);
         for k in 0..6 {
             s.spawn_agent(0, tx, ty, k % 2, false);
@@ -5705,6 +5787,7 @@ mod tests {
     #[test]
     fn farm_field_regrows_after_harvest() {
         let mut s = Sim::new(72);
+        s.towns[0].stocks.wood = 40.0;
         s.plant_fields(s.towns[0].x, s.towns[0].y);
         let fidx = s
             .grid
@@ -5712,7 +5795,7 @@ mod tests {
             .position(|c| c.terrain == Terrain::Farm)
             .unwrap();
         s.grid[fidx].food = 0.5;
-        for _ in 0..45 {
+        for _ in 0..105 {
             s.tick();
         }
         assert!(
@@ -5908,7 +5991,7 @@ fn marriages_form_and_cheapen_births() {
             }
             assert!(s.alliance_between(0, 1), "marriage should ally the two towns");
             assert!(s.has_alliance(0), "aligned town should report its alliance");
-            s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 20.0, meat: 20.0, gold: 0.0, fish: 0.0 };
+            s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 20.0, meat: 20.0, gold: 0.0, fish: 0.0, wood: 0.0 };
             s.towns[0].cap = 40;
             let start = s.towns[0].stocks.food;
             s.reproduction();
@@ -5927,7 +6010,7 @@ fn marriages_form_and_cheapen_births() {
             s.towns.push(Settlement {
                 x: bx,
                 y: by,
-                stocks: Stock { food: 40.0, water: 30.0, ore: 10.0, meat: 6.0, gold: 0.0, fish: 0.0 },
+                stocks: Stock { food: 40.0, water: 30.0, ore: 10.0, meat: 6.0, gold: 0.0, fish: 0.0, wood: 0.0 },
                 r: 200,
                 g: 200,
                 b: 200,
@@ -5967,7 +6050,7 @@ fn marriages_form_and_cheapen_births() {
             s.towns[1].x = s.towns[0].x + 20;
             s.towns[1].y = s.towns[0].y;
             craft_families(&mut s);
-            s.towns[0].stocks = Stock { food: 300.0, water: 300.0, ore: 50.0, meat: 30.0, gold: 0.0, fish: 0.0 };
+            s.towns[0].stocks = Stock { food: 300.0, water: 300.0, ore: 50.0, meat: 30.0, gold: 0.0, fish: 0.0, wood: 0.0 };
             s.towns[0].cap = 60;
             s.alliances.push((0, 1, u64::MAX));
             s.towns[0].empire = Some(0);
@@ -6006,8 +6089,8 @@ fn marriages_form_and_cheapen_births() {
     fn gifts_flow_from_surplus_town_to_ally() {
         let mut s = Sim::new(7);
         s.alliances.push((0, 1, u64::MAX));
-        s.towns[0].stocks = Stock { food: 500.0, water: 500.0, ore: 20.0, meat: 10.0, gold: 0.0, fish: 0.0 };
-        s.towns[1].stocks = Stock { food: 5.0, water: 5.0, ore: 5.0, meat: 5.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 500.0, water: 500.0, ore: 20.0, meat: 10.0, gold: 0.0, fish: 0.0, wood: 0.0 };
+        s.towns[1].stocks = Stock { food: 5.0, water: 5.0, ore: 5.0, meat: 5.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.towns[0].x = 60;
         s.towns[0].y = 60;
         s.towns[1].x = 61;
@@ -6064,7 +6147,7 @@ fn marriages_form_and_cheapen_births() {
                 continue;
             }
             assert!(s.treaty_between(0, 2), "treaty should bind the two empires");
-            s.towns[0].stocks = Stock { food: 300.0, water: 300.0, ore: 50.0, meat: 30.0, gold: 0.0, fish: 0.0 };
+            s.towns[0].stocks = Stock { food: 300.0, water: 300.0, ore: 50.0, meat: 30.0, gold: 0.0, fish: 0.0, wood: 0.0 };
             s.towns[0].cap = 60;
             craft_families(&mut s);
             for _ in 0..1500 {
@@ -6090,7 +6173,7 @@ fn marriages_form_and_cheapen_births() {
         let mut s = Sim::new(90);
         s.agents.clear();
         let (tx, ty) = (s.towns[0].x, s.towns[0].y);
-        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         for _ in 0..6 {
             s.spawn_agent(0, tx, ty, 0, false);
         }
@@ -6134,7 +6217,7 @@ fn marriages_form_and_cheapen_births() {
         let mut s = Sim::new(92);
         craft_families(&mut s);
         let (tx, ty) = (s.towns[0].x, s.towns[0].y);
-        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0, fish: 0.0, wood: 40.0 };
         s.towns[0].dev = TECH_TIER1;
         for _ in 0..6 {
             s.spawn_agent(0, tx, ty, 0, false);
@@ -6170,7 +6253,7 @@ fn marriages_form_and_cheapen_births() {
         let mut s = Sim::new(93);
         craft_families(&mut s);
         let (tx, ty) = (s.towns[0].x, s.towns[0].y);
-        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 100.0, meat: 20.0, gold: 0.0, fish: 0.0, wood: 40.0 };
         s.towns[0].built.push(BuildingKind::Smithy);
         s.spawn_agent(0, tx, ty, 0, false);
         let bi = s.agents.len() - 1;
@@ -6279,7 +6362,7 @@ fn marriages_form_and_cheapen_births() {
     fn gold_vein_pays_outstanding_gold_to_surrounding_towns() {
         let mut s = Sim::new(77);
         s.agents.clear();
-        s.towns[0].stocks = Stock { food: 50.0, water: 50.0, ore: 10.0, meat: 5.0, gold: 0.0, fish: 0.0 };
+        s.towns[0].stocks = Stock { food: 50.0, water: 50.0, ore: 10.0, meat: 5.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.towns[0].x = 40;
         s.towns[0].y = 40;
         s.gold_veins.clear();

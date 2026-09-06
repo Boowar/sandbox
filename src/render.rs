@@ -497,6 +497,16 @@ fn draw_building(
             ctx.set_fill_style_str("rgb(200,190,150)");
             ctx.fill_rect(px + 2.0, py + 3.0, 2.0, 1.0);
         }
+        crate::sim::BuildingKind::Sawmill => {
+            ctx.set_fill_style_str("rgb(130,90,50)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 4.0);
+            ctx.set_fill_style_str("rgb(100,70,40)");
+            ctx.fill_rect(px, py + 1.0, 6.0, 1.0);
+            ctx.set_fill_style_str("rgb(180,130,60)");
+            ctx.fill_rect(px + 1.0, py + 2.0, 4.0, 2.0);
+            ctx.set_fill_style_str("rgb(80,60,30)");
+            ctx.fill_rect(px + 2.0, py + 3.0, 2.0, 2.0);
+        }
     }
 }
 
@@ -837,6 +847,7 @@ pub fn draw(
                 crate::sim::ResourceKind::Meat => "rgb(232,120,96)",
                 crate::sim::ResourceKind::Gold => "rgb(255,222,120)",
                 crate::sim::ResourceKind::Fish => "rgb(100,180,255)",
+                crate::sim::ResourceKind::Wood => "rgb(180,130,60)",
             };
             ctx.set_fill_style_str(col);
             ctx.fill_rect(fx + 1.0, fy - 1.0, 3.0, 1.0);
@@ -976,6 +987,7 @@ for a in &sim.animals {
     );
     let temples = count_building(sim, crate::sim::BuildingKind::Temple);
     let warehouses = count_building(sim, crate::sim::BuildingKind::Warehouse);
+    let sawmills = count_building(sim, crate::sim::BuildingKind::Sawmill);
     let science: f32 = sim.towns.iter().map(|t| t.dev).sum();
     let scholars: usize = sim.agents.iter().filter(|a| a.role == Role::Scholar).count();
     let builders: usize = sim.agents.iter().filter(|a| a.role == Role::Builder).count();
@@ -1007,7 +1019,7 @@ for a in &sim.animals {
     let mut lines: Vec<String> = Vec::new();
     let mut line_colors: Vec<Option<(u8, u8, u8)>> = Vec::new();
 
-    lines.push(format!("{} {}  {}  tick {}", day_name, season_name, weather_name, sim.tick_count));
+    lines.push(format!("{} {}  {}  {}", day_name, season_name, weather_name, sim.date_string()));
     line_colors.push(None);
 
     let avg_mood: f32 = if sim.agents.is_empty() { 0.0 } else { sim.agents.iter().map(|a| a.mood).sum::<f32>() / sim.agents.len() as f32 };
@@ -1016,7 +1028,7 @@ for a in &sim.animals {
     line_colors.push(None);
 
     if hud.show_buildings {
-        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{} 🛕{} 📦{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, temples, warehouses, pending));
+        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{} 🛕{} 📦{} 🪚{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, temples, warehouses, sawmills, pending));
         line_colors.push(None);
     }
 
@@ -1094,8 +1106,8 @@ for a in &sim.animals {
     }
     if hud.show_caravans {
         let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
-        let gold_in_route: i32 = sim.caravans.iter().map(|c| c.goods.iter().map(|(k, q)| q * crate::sim::trade_price(*k)).sum::<f32>() as i32).sum();
-        lines.push(format!("💰 {}g  🐫 caravan {}  (+{} in route)", gold_total, sim.caravans.len(), gold_in_route));
+        let wood_total: i32 = sim.towns.iter().map(|t| t.stocks.wood as i32).sum();
+        lines.push(format!("💰 {}g  🪵 {}  🐫 caravan {}", gold_total, wood_total, sim.caravans.len()));
         line_colors.push(None);
     }
 
@@ -1238,6 +1250,7 @@ for a in &sim.animals {
             let lib = build_counts(crate::sim::BuildingKind::Library);
             let temple = build_counts(crate::sim::BuildingKind::Temple);
             let warehouse = build_counts(crate::sim::BuildingKind::Warehouse);
+            let sawmill = build_counts(crate::sim::BuildingKind::Sawmill);
             let bless_name = match t.blessing {
                 crate::sim::Blessing::Fertility => "плодородие",
                 crate::sim::Blessing::Abundance => "изобилие",
@@ -1268,6 +1281,7 @@ for a in &sim.animals {
                     crate::sim::BuildingKind::Library => "📚",
                     crate::sim::BuildingKind::Temple => "🛕",
                     crate::sim::BuildingKind::Warehouse => "📦",
+                    crate::sim::BuildingKind::Sawmill => "🪚",
                 }).collect::<Vec<_>>().join("")
             };
             let families: Vec<_> = sim.families.iter()
@@ -1315,10 +1329,12 @@ for a in &sim.animals {
             p.push(format!("{} 🥩 meat  {:>5.0}/{:.0} [{}]", res_color(t.stocks.meat, mc), t.stocks.meat, mc, res_bar(t.stocks.meat, mc)));
             p.push(format!("{} 💰 gold  {:>5.0}/{:.0} [{}]", res_color(t.stocks.gold, gc), t.stocks.gold, gc, res_bar(t.stocks.gold, gc)));
             p.push(format!("{} 🐟 fish  {:>5.0}/{:.0} [{}]", res_color(t.stocks.fish, fic), t.stocks.fish, fic, res_bar(t.stocks.fish, fic)));
+            let wc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Wood);
+            p.push(format!("{} 🪵 wood  {:>5.0}/{:.0} [{}]", res_color(t.stocks.wood, wc), t.stocks.wood, wc, res_bar(t.stocks.wood, wc)));
             p.push(String::new());
 
             p.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{}", houses, wells, farms, posts, clinic, wall));
-            p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{} 📦{}", barracks, uni, smith, lib, temple, warehouse));
+            p.push(format!("⛩{} 🎓{} 🔨{} 📚{} 🛕{} 📦{} 🪚{}", barracks, uni, smith, lib, temple, warehouse, sawmill));
             if !t.queue.is_empty() {
                 let current = &t.queue[0];
                 let pct = (current.1 / current.0.cost() * 100.0) as u32;
@@ -1332,6 +1348,7 @@ for a in &sim.animals {
                         crate::sim::BuildingKind::University => "🎓", crate::sim::BuildingKind::Smithy => "🔨",
                         crate::sim::BuildingKind::Library => "📚", crate::sim::BuildingKind::Temple => "🛕",
                         crate::sim::BuildingKind::Warehouse => "📦",
+                    crate::sim::BuildingKind::Sawmill => "🪚",
                     }).collect();
                     p.push(format!("  .Queue: {}", rest.join(" ")));
                 }
@@ -1350,6 +1367,7 @@ for a in &sim.animals {
             if lib > 0 { p.push(format!("  📚 Library  ({}) +0.04 sci/tick", lib)); }
             if temple > 0 { p.push(format!("  🛕 Temple   ({}) priests, +faith", temple)); }
             if warehouse > 0 { p.push(format!("  📦 Warehouse ({}) +40 food/water, +25 ore", warehouse)); }
+            if sawmill > 0 { p.push(format!("  🪚 Sawmill   ({}) +0.8 wood/tick", sawmill)); }
             p.push(String::new());
             let mut role_line = String::new();
             for (r, c) in &role_counts {
@@ -1446,6 +1464,7 @@ for a in &sim.animals {
                         crate::sim::ResourceKind::Meat => "🥩",
                         crate::sim::ResourceKind::Gold => "💰",
                         crate::sim::ResourceKind::Fish => "🐟",
+                        crate::sim::ResourceKind::Wood => "🪵",
                     }).collect();
                     format!("{}{}{}", arrow, name, res.join(""))
                 }).collect();
