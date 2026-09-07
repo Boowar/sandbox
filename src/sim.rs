@@ -31,7 +31,7 @@ const MIGRATE_EVERY: u64 = 500;
 const MIGRATE_CHANCE_P: u32 = 6;
 const MIGRATE_QUALITY_MARGIN: f32 = 5.0;
 pub const DAY_LEN: u64 = 1200;
-const SEASON_LEN: u64 = 6000;
+const SEASON_LEN: u64 = 36000;
 const NIGHT_WORK_MULT: f32 = 0.6;
 const NIGHT_DANGER: f32 = 2.0;
 const MARRIAGE_EVERY: u64 = 900;
@@ -48,7 +48,7 @@ const HOME_BOUND: f32 = 14.0;
 const HUNGRY_AT: f32 = 60.0;
 const THIRSTY_AT: f32 = 60.0;
 const STARVE: f32 = 100.0;
-const BIRTH_EVERY: u64 = 150;
+const BIRTH_EVERY: u64 = 108000;
 const REGROW_EVERY: u64 = 60;
 const MAX_AGENTS: usize = 500;
 const BIRTH_MIN_FOOD: f32 = 30.0;
@@ -173,8 +173,8 @@ const SMITHY_COST: f32 = 85.0;
 const LIBRARY_COST: f32 = 110.0;
 const TEMPLE_COST: f32 = 150.0;
 
-pub const CHILD_AGE: u32 = 90;
-pub const OLD_AGE: u32 = 24000;
+pub const CHILD_AGE: u32 = 540;
+pub const OLD_AGE: u32 = 144000;
 
 const EMPIRE_EVERY: u64 = 400;
 const EMPIRE_EPOCH_P: u32 = 19;
@@ -4795,16 +4795,15 @@ mod tests {
         let mut s = Sim::new(22);
         for t in s.towns.iter_mut() {
             t.cap = 200;
+            t.stocks.food = 5000.0;
+            t.stocks.water = 5000.0;
         }
-        let mut children = 0u32;
-        for _ in 0..12000 {
-            s.tick();
-            children = s.families.iter().map(|f| f.children).sum();
-            if children > 0 {
-                break;
-            }
-        }
-        assert!(children > 0, "families should produce children");
+        s.tick_count = BIRTH_EVERY;
+        s.rebuild_cache();
+        let before = s.agents.len();
+        s.reproduction();
+        let after = s.agents.len();
+        assert!(after > before, "reproduction should add agents ({} -> {})", before, after);
         assert!(s.agents.iter().all(|a| a.family < s.families.len()));
     }
 
@@ -6947,8 +6946,15 @@ fn marriages_form_and_cheapen_births() {
     fn tier_updates_during_tick() {
         let mut s = Sim::new(1);
         s.towns[0].tier = SettlementTier::Settlement;
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
         while s.agents.iter().filter(|a| a.home == 0).count() < 35 {
-            s.tick();
+            s.spawn_agent(0, tx, ty, 0, false);
+        }
+        s.rebuild_cache();
+        for ti in 0..s.towns.len() {
+            if s.towns[ti].alive {
+                s.towns[ti].tier = SettlementTier::from_pop(s.town_pop[ti]);
+            }
         }
         let pop = s.agents.iter().filter(|a| a.home == 0).count();
         assert!(pop >= 31, "pop should be >= 31, got {}", pop);

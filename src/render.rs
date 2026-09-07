@@ -1,4 +1,4 @@
-use crate::sim::{Role, Species, Season, Terrain, TownIdea, Weather, DAY_LEN, H, CELL, Sim, W};
+use crate::sim::{Role, Species, Season, Terrain, TownIdea, Weather, H, CELL, Sim, W};
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
@@ -930,46 +930,6 @@ for a in &sim.animals {
         draw_caravan(&ctx, c.x as f64 * CELL, c.y as f64 * CELL);
     }
 
-    match sim.weather {
-        Weather::Clear => {}
-        Weather::Rain => {
-            ctx.set_fill_style_str("rgba(150,190,255,0.18)");
-            let ph = tick as usize % 9;
-            for i in 0..100usize {
-                let wx = (i as f64 * 173.0 + ph as f64 * 5.0) % cw;
-                let wy = (i as f64 * 97.0 + ph as f64 * 8.0) % ch;
-                ctx.fill_rect(wx, wy, 1.0, 4.0);
-            }
-            ctx.set_fill_style_str("rgba(96,140,220,0.10)");
-            ctx.fill_rect(0.0, 0.0, cw, ch);
-        }
-        Weather::Heat => {
-            ctx.set_fill_style_str(&format!(
-                "rgba(255,140,40,{:.3})",
-                0.04 + (tick % 30) as f64 * 0.002
-            ));
-            ctx.fill_rect(0.0, 0.0, cw, ch);
-        }
-        Weather::Frost => {
-            ctx.set_fill_style_str("rgba(200,210,230,0.18)");
-            ctx.fill_rect(0.0, 0.0, cw, ch);
-        }
-    }
-
-    if sim.season == Season::Winter && sim.weather != Weather::Heat {
-        let ph = tick as usize % 11;
-        ctx.set_fill_style_str("rgba(240,245,255,0.12)");
-        for i in 0..120usize {
-            let wx = (i as f64 * 149.0 + ph as f64 * 3.0) % cw;
-            let wy = (i as f64 * 83.0 + ph as f64 * 2.0) % ch;
-            ctx.fill_rect(wx, wy, 2.0, 1.0);
-        }
-    }
-
-    if sim.is_night() {
-        ctx.set_fill_style_str("rgba(8,12,26,0.34)");
-        ctx.fill_rect(0.0, 0.0, cw, ch);
-    }
     ctx.set_fill_style_str("rgba(140,120,90,0.35)");
     for y in 0..H {
         for x in 0..W {
@@ -983,27 +943,6 @@ for a in &sim.animals {
             }
         }
     }
-    let dawn_len = DAY_LEN as f64 * 0.1;
-    let phase = sim.day_phase as f64;
-    let dusk = if phase < dawn_len {
-        (dawn_len - phase) / dawn_len
-    } else if phase > DAY_LEN as f64 - dawn_len {
-        (phase - (DAY_LEN as f64 - dawn_len)) / dawn_len
-    } else {
-        0.0
-    };
-    if dusk > 0.0 {
-        ctx.set_fill_style_str(&format!("rgba(255,150,60,{:.2})", dusk * 0.18));
-        ctx.fill_rect(0.0, 0.0, cw, ch);
-    }
-    let season_tint = match sim.season {
-        Season::Winter => "rgba(195,220,255,0.13)",
-        Season::Spring => "rgba(140,240,170,0.06)",
-        Season::Summer => "rgba(255,225,130,0.05)",
-        Season::Autumn => "rgba(220,150,70,0.11)",
-    };
-    ctx.set_fill_style_str(season_tint);
-    ctx.fill_rect(0.0, 0.0, cw, ch);
 
     for e in fxs {
         let k = (e.life / 26.0).clamp(0.0, 1.0) as f64;

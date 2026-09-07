@@ -898,6 +898,12 @@ pub fn start() -> Result<(), JsValue> {
     bind_click(&document.get_element_by_id("btnHud").ok_or("no btnHud")?, &app, |a| {
         a.hud.cycle();
     })?;
+    bind_click(&document.get_element_by_id("btnFontDown").ok_or("no btnFontDown")?, &app, |a| {
+        a.hud.hud_font_size = (a.hud.hud_font_size - 1.0).max(7.0);
+    })?;
+    bind_click(&document.get_element_by_id("btnFontUp").ok_or("no btnFontUp")?, &app, |a| {
+        a.hud.hud_font_size = (a.hud.hud_font_size + 1.0).min(28.0);
+    })?;
     bind_click(&document.get_element_by_id("btnSave").ok_or("no btnSave")?, &app, |a| {
         a.save_to_local();
         a.download_save();
