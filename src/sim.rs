@@ -149,6 +149,9 @@ const PLAGUE_CHANCE: f32 = 0.00025;
 const PLAGUE_LEN: u64 = 1500;
 const HEAL_RADIUS: i32 = 3;
 const HEAL_PER_TICK: u32 = 2;
+const SPATIAL_CELL: i32 = 16;
+const SPATIAL_COLS: usize = (W as i32 / SPATIAL_CELL + 1) as usize;
+const SPATIAL_ROWS: usize = (H as i32 / SPATIAL_CELL + 1) as usize;
 
 const WALL_COST: f32 = 50.0;
 const BARRACKS_COST: f32 = 45.0;
@@ -722,6 +725,12 @@ pub struct Sim {
     pub day_phase: u64,
     pub rng: u64,
     pub next_agent_id: u32,
+    #[serde(default)]
+    pub town_pop: Vec<usize>,
+    #[serde(default)]
+    pub town_has_sick: Vec<bool>,
+    #[serde(default)]
+    pub fire_cells: Vec<usize>,
 }
 
 fn idx(x: i32, y: i32) -> usize {
@@ -771,13 +780,31 @@ impl Sim {
             day_phase: 0,
             rng,
             next_agent_id: 0,
+            town_pop: Vec::new(),
+            town_has_sick: Vec::new(),
+            fire_cells: Vec::new(),
         };
         sim.ensure_hills();
         sim.scatter_reefs();
         sim.scatter_volcanoes();
         sim.spawn_world();
         sim.spawn_animals();
+        sim.rebuild_cache();
         sim
+    }
+
+    fn rebuild_cache(&mut self) {
+        let n_towns = self.towns.len();
+        self.town_pop.clear();
+        self.town_pop.resize(n_towns, 0);
+        self.town_has_sick.clear();
+        self.town_has_sick.resize(n_towns, false);
+        for a in &self.agents {
+            if a.home < n_towns {
+                self.town_pop[a.home] += 1;
+                if a.sick > 0 { self.town_has_sick[a.home] = true; }
+            }
+        }
     }
 
     fn make_terrain(rng: &mut u64) -> Vec<Cell> {
@@ -1656,7 +1683,7 @@ impl Sim {
             if !self.towns[ti].alive {
                 continue;
             }
-            if self.pop(ti) < SCIENCE_REQ_POP {
+            if self.town_pop[ti] < SCIENCE_REQ_POP {
                 continue;
             }
             let (uni, lib, scholars) = {
@@ -1715,8 +1742,8 @@ impl Sim {
                 .iter()
                 .filter(|a| a.home == ti && a.role == Role::Builder)
                 .count();
-            let pop_ti = self.pop(ti);
-            let has_sick = self.agents.iter().any(|a| a.home == ti && a.sick > 0);
+            let pop_ti = self.town_pop[ti];
+            let has_sick = self.town_has_sick[ti];
             let apply = {
                 let t = &mut self.towns[ti];
                 if t.queue.is_empty() && pop_ti > 0 {
@@ -1900,10 +1927,10 @@ impl Sim {
             };
         }
 
+        self.rebuild_cache();
         for ti in 0..self.towns.len() {
             if self.towns[ti].alive {
-                let pop = self.agents.iter().filter(|a| a.home == ti).count();
-                self.towns[ti].tier = SettlementTier::from_pop(pop);
+                self.towns[ti].tier = SettlementTier::from_pop(self.town_pop[ti]);
             }
         }
         if self.tick_count % 30 == 0 || self.tick_count == 1 {
@@ -2053,22 +2080,15 @@ impl Sim {
         }
 
         let wmult = if self.is_night() { NIGHT_WORK_MULT } else { 1.0 };
-        let n_towns = self.towns.len();
-        let pops: Vec<usize> = (0..n_towns).map(|ti| self.pop(ti)).collect();
-        let building_counts: Vec<(usize, usize, usize, usize)> = (0..n_towns).map(|ti| {
-            let t = &self.towns[ti];
-            let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
-            let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
-            let sanctuaries = t.built.iter().filter(|b| **b == BuildingKind::Sanctuary).count();
-            let temples = t.built.iter().filter(|b| **b == BuildingKind::Temple).count();
-            (wells, posts, sanctuaries, temples)
-        }).collect();
         for (ti, t) in self.towns.iter_mut().enumerate() {
             if !t.alive {
                 continue;
             }
-            let (wells, posts, sanctuaries, temples) = building_counts[ti];
-            if wells > 0 && pops[ti] > 0 {
+            let wells = t.built.iter().filter(|b| **b == BuildingKind::Well).count();
+            let posts = t.built.iter().filter(|b| **b == BuildingKind::TradePost).count();
+            let sanctuaries = t.built.iter().filter(|b| **b == BuildingKind::Sanctuary).count();
+            let temples = t.built.iter().filter(|b| **b == BuildingKind::Temple).count();
+            if wells > 0 && self.town_pop[ti] > 0 {
                 let water_cap = stock_cap(&t.built, ResourceKind::Water);
                 let rain_mult = if self.weather == Weather::Rain { 1.5 } else { 1.0 };
                 t.stocks.water = clamp_stock(t.stocks.water, WELL_WATER_PER_TICK * wells as f32 * wmult * rain_mult, water_cap);
@@ -2079,13 +2099,13 @@ impl Sim {
                 t.stocks.gold = clamp_stock(t.stocks.gold, TRADE_TRICKLE * posts as f32 * trade_mult, gold_cap);
             }
             let sawmills = t.built.iter().filter(|b| **b == BuildingKind::Sawmill).count();
-            if sawmills > 0 && pops[ti] > 0 {
+            if sawmills > 0 && self.town_pop[ti] > 0 {
                 let wood_cap = stock_cap(&t.built, ResourceKind::Wood);
                 let saw_mult = if self.weather == Weather::Rain { 1.3 } else { 1.0 };
                 t.stocks.wood = clamp_stock(t.stocks.wood, SAWMILL_WOOD_PER_TICK * sawmills as f32 * wmult * saw_mult, wood_cap);
             }
             let farms = t.built.iter().filter(|b| **b == BuildingKind::Farm).count();
-            if farms > 0 && pops[ti] > 0 {
+            if farms > 0 && self.town_pop[ti] > 0 {
                 let food_cap = stock_cap(&t.built, ResourceKind::Food);
                 let farm_mult = match self.weather {
                     Weather::Heat => 0.7,
@@ -2165,9 +2185,10 @@ impl Sim {
         self.caravans_step();
         self.market_buy();
         self.export_caravans();
-        self.social_step();
-        self.plague_step();
-        self.heal_step();
+        let spatial = self.build_spatial();
+        self.social_step(&spatial);
+        self.plague_step(&spatial);
+        self.heal_step(&spatial);
 
         let mut dead = Vec::new();
         for i in 0..self.agents.len() {
@@ -2195,6 +2216,7 @@ impl Sim {
         }
         self.sync_families();
         self.retrain_roles();
+        self.rebuild_cache();
         if self.tick_count % EMPIRE_EVERY == 0 {
             self.empire_step();
         }
@@ -2212,6 +2234,7 @@ impl Sim {
         if self.tick_count % TOWNS_EVERY == 0 {
             self.town_lifecycle();
         }
+        self.rebuild_cache();
         if self.tick_count % METEOR_EVERY == 0 {
             self.meteor_step();
         }
@@ -2275,7 +2298,19 @@ impl Sim {
     }
 
     pub fn load_json(json: &str) -> Option<Self> {
-        serde_json::from_str(json).ok()
+        let mut sim: Self = serde_json::from_str(json).ok()?;
+        sim.rebuild_cache();
+        sim.rebuild_fire_cells();
+        Some(sim)
+    }
+
+    fn rebuild_fire_cells(&mut self) {
+        self.fire_cells.clear();
+        for (i, c) in self.grid.iter().enumerate() {
+            if c.burn > 0 {
+                self.fire_cells.push(i);
+            }
+        }
     }
 
     fn animals_step(&mut self) {
@@ -3105,7 +3140,35 @@ impl Sim {
         self.towns.iter().any(|t| t.blessing == Blessing::Protection)
     }
 
-    fn social_step(&mut self) {
+    fn build_spatial(&self) -> Vec<Vec<usize>> {
+        let mut grid: Vec<Vec<usize>> = vec![Vec::new(); SPATIAL_COLS * SPATIAL_ROWS];
+        for (i, a) in self.agents.iter().enumerate() {
+            let bx = ((a.x / SPATIAL_CELL).max(0) as usize).min(SPATIAL_COLS - 1);
+            let by = ((a.y / SPATIAL_CELL).max(0) as usize).min(SPATIAL_ROWS - 1);
+            grid[by * SPATIAL_COLS + bx].push(i);
+        }
+        grid
+    }
+
+    fn spatial_neighbors(spatial: &[Vec<usize>], x: i32, y: i32, range: i32) -> Vec<usize> {
+        let bx = x / SPATIAL_CELL;
+        let by = y / SPATIAL_CELL;
+        let cr = range / SPATIAL_CELL + 1;
+        let mut result = Vec::new();
+        for dy in -cr..=cr {
+            for dx in -cr..=cr {
+                let nx = bx + dx;
+                let ny = by + dy;
+                if nx >= 0 && ny >= 0 && (nx as usize) < SPATIAL_COLS && (ny as usize) < SPATIAL_ROWS {
+                    let bi = ny as usize * SPATIAL_COLS + nx as usize;
+                    result.extend(spatial[bi].iter().copied());
+                }
+            }
+        }
+        result
+    }
+
+    fn social_step(&mut self, spatial: &[Vec<usize>]) {
         let epoch = self.tick_count;
         let n = self.agents.len();
         for i in 0..n {
@@ -3114,7 +3177,8 @@ impl Sim {
                 (a.x, a.y, a.home, a.hunger, a.thirst, a.family)
             };
             let mut mood_delta = 0.0;
-            for j in 0..n {
+            let neighbors = Self::spatial_neighbors(&spatial, ix, iy, FRIEND_RANGE);
+            for j in neighbors {
                 if i == j {
                     continue;
                 }
@@ -3187,7 +3251,7 @@ impl Sim {
         }
     }
 
-    fn plague_step(&mut self) {
+    fn plague_step(&mut self, spatial: &[Vec<usize>]) {
         for ti in 0..self.towns.len() {
             if !self.towns[ti].alive {
                 self.towns[ti].plague_until = 0;
@@ -3203,10 +3267,10 @@ impl Sim {
                     if a.home != ti || a.sick > 0 {
                         continue;
                     }
-                    let near_sick = self.agents.iter().any(|o| {
-                        o.home == ti
-                            && o.sick > 0
-                            && self.cheb(o.x, o.y, a.x, a.y) <= CONTAGION_RADIUS
+                    let neighbors = Self::spatial_neighbors(&spatial, a.x, a.y, CONTAGION_RADIUS as i32);
+                    let near_sick = neighbors.iter().any(|&k| {
+                        let o = &self.agents[k];
+                        o.home == ti && o.sick > 0 && self.cheb(o.x, o.y, a.x, a.y) <= CONTAGION_RADIUS
                     });
                     if near_sick && rfrac(&mut self.rng) < chance {
                         inf.push(j);
@@ -3220,7 +3284,7 @@ impl Sim {
                     let t = &self.towns[ti];
                     (t.cap, t.at_war, t.x, t.y)
                 };
-                let crowded = self.pop(ti) >= cap && cap >= 10;
+                let crowded = self.town_pop[ti] >= cap && cap >= 10;
                 let foul = self.weather == Weather::Frost || self.weather == Weather::Rain;
                 let prophylaxis = self.towns[ti].prophecy == Prophecy::PlagueWarning;
                 if crowded && (foul || at_war) {
@@ -3245,17 +3309,18 @@ impl Sim {
         }
     }
 
-    fn heal_step(&mut self) {
+    fn heal_step(&mut self, spatial: &[Vec<usize>]) {
         let mut healed = vec![0u32; self.agents.len()];
         for i in 0..self.agents.len() {
             if self.agents[i].role == Role::Healer {
-                for j in 0..self.agents.len() {
+                let hx = self.agents[i].x;
+                let hy = self.agents[i].y;
+                let neighbors = Self::spatial_neighbors(&spatial, hx, hy, HEAL_RADIUS);
+                for j in neighbors {
                     if i == j || self.agents[j].sick == 0 {
                         continue;
                     }
-                    if self.cheb(self.agents[i].x, self.agents[i].y, self.agents[j].x, self.agents[j].y)
-                        <= HEAL_RADIUS
-                    {
+                    if self.cheb(hx, hy, self.agents[j].x, self.agents[j].y) <= HEAL_RADIUS {
                         healed[j] += HEAL_PER_TICK;
                     }
                 }
@@ -3289,7 +3354,7 @@ impl Sim {
             if used_town[fam_town] {
                 continue;
             }
-            if self.pop(fam_town) >= self.towns[fam_town].cap {
+            if self.town_pop[fam_town] >= self.towns[fam_town].cap {
                 continue;
             }
             let st = &self.towns[fam_town].stocks;
@@ -3415,7 +3480,7 @@ impl Sim {
             if !self.towns[ti].alive {
                 continue;
             }
-            let ruined = self.pop(ti) == 0 && self.towns[ti].stocks.food < WASTE_FOOD && self.towns[ti].stocks.water < WASTE_WATER;
+            let ruined = self.town_pop[ti] == 0 && self.towns[ti].stocks.food < WASTE_FOOD && self.towns[ti].stocks.water < WASTE_WATER;
             let waste = if ruined { self.towns[ti].waste + 1 } else { 0 };
             self.towns[ti].waste = waste;
             if waste >= TOWN_WASTE_NEED {
@@ -3433,7 +3498,7 @@ impl Sim {
                 continue;
             }
             let t = &self.towns[mi];
-            if self.pop(mi) < FOUND_MIN_POP || t.stocks.food < FOUND_MIN_FOOD || t.stocks.water < FOUND_MIN_WATER {
+            if self.town_pop[mi] < FOUND_MIN_POP || t.stocks.food < FOUND_MIN_FOOD || t.stocks.water < FOUND_MIN_WATER {
                 continue;
             }
             if self.brain(t.x, t.y, epoch) % FOUND_EPOCH_P != 0 {
@@ -3666,54 +3731,57 @@ impl Sim {
 
     fn town_quality(&self, ti: usize) -> f32 {
         let t = &self.towns[ti];
-        t.stocks.food + t.stocks.water * 0.7 - (self.pop(ti) as f32 / t.cap.max(1) as f32) * 40.0
+                t.stocks.food + t.stocks.water * 0.7 - (self.town_pop[ti] as f32 / t.cap.max(1) as f32) * 40.0
     }
 
     fn fire_spread(&mut self) {
         let mut ignites: Vec<usize> = Vec::new();
-        for y in 0..H {
-            for x in 0..W {
-                let i = idx(x as i32, y as i32);
-                if self.grid[i].burn == 0 {
-                    continue;
-                }
-                self.grid[i].burn -= 1;
-                if self.grid[i].burn == 0 {
-                    let was_swamp = self.grid[i].terrain == Terrain::Swamp;
-                    self.grid[i].terrain = if was_swamp { Terrain::Swamp } else { Terrain::Grass };
-                    self.grid[i].food = 0.0;
-                    continue;
-                }
-                if self.brain(x as i32, y as i32, self.tick_count / FIRE_SPREAD_DIV) % 2 == 0 {
-                    for dy in -1..=1 {
-                        for dx in -1..=1 {
-                            if dx == 0 && dy == 0 {
-                                continue;
-                            }
-                            let nx = x as i32 + dx;
-                            let ny = y as i32 + dy;
-                            if !in_bounds(nx, ny) {
-                                continue;
-                            }
-                            let ni = idx(nx, ny);
-                            if self.grid[ni].burn == 0
-                                && (self.grid[ni].terrain == Terrain::Forest
-                                    || self.grid[ni].terrain == Terrain::Farm
-                                    || self.grid[ni].terrain == Terrain::Jungle
-                                    || self.grid[ni].terrain == Terrain::Swamp)
-                            {
-                                ignites.push(ni);
-                            }
+        let mut survivors: Vec<usize> = Vec::new();
+        for &i in &self.fire_cells {
+            if self.grid[i].burn == 0 {
+                continue;
+            }
+            self.grid[i].burn -= 1;
+            if self.grid[i].burn == 0 {
+                let was_swamp = self.grid[i].terrain == Terrain::Swamp;
+                self.grid[i].terrain = if was_swamp { Terrain::Swamp } else { Terrain::Grass };
+                self.grid[i].food = 0.0;
+                continue;
+            }
+            survivors.push(i);
+            let x = (i % W) as i32;
+            let y = (i / W) as i32;
+            if self.brain(x, y, self.tick_count / FIRE_SPREAD_DIV) % 2 == 0 {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let nx = x + dx;
+                        let ny = y + dy;
+                        if !in_bounds(nx, ny) {
+                            continue;
+                        }
+                        let ni = idx(nx, ny);
+                        if self.grid[ni].burn == 0
+                            && (self.grid[ni].terrain == Terrain::Forest
+                                || self.grid[ni].terrain == Terrain::Farm
+                                || self.grid[ni].terrain == Terrain::Jungle
+                                || self.grid[ni].terrain == Terrain::Swamp)
+                        {
+                            ignites.push(ni);
                         }
                     }
                 }
             }
         }
+        self.fire_cells = survivors;
         for &ni in ignites.iter() {
             let c = &mut self.grid[ni];
             if c.burn == 0 && (c.terrain == Terrain::Forest || c.terrain == Terrain::Farm || c.terrain == Terrain::Jungle || c.terrain == Terrain::Swamp) {
                 c.burn = FIRE_LEN;
                 c.food = c.food.min(2.0);
+                self.fire_cells.push(ni);
             }
         }
     }
@@ -3721,21 +3789,25 @@ impl Sim {
     fn fire_step(&mut self) {
         if self.tick_count % FIRE_EVERY == 0 {
             let epoch = self.tick_count / FIRE_EVERY;
-            for y in 0..H {
-                for x in 0..W {
-                    let i = idx(x as i32, y as i32);
-                    if self.grid[i].terrain != Terrain::Forest || self.grid[i].burn > 0 {
-                        continue;
-                    }
-                    if self.brain(x as i32, y as i32, epoch) % FIRE_CHANCE_P == 0 {
-                        self.grid[i].burn = FIRE_LEN;
-                        self.grid[i].food = self.grid[i].food.min(2.0);
-                        self.fire_spread();
-                        return;
-                    }
+            let mut forest_cells: Vec<usize> = Vec::new();
+            for i in 0..self.grid.len() {
+                if self.grid[i].terrain == Terrain::Forest && self.grid[i].burn == 0 {
+                    forest_cells.push(i);
                 }
             }
-        } else {
+            if !forest_cells.is_empty() {
+                let pick = (self.brain(0, 0, epoch) as usize) % forest_cells.len();
+                let i = forest_cells[pick];
+                let x = (i % W) as i32;
+                let y = (i / W) as i32;
+                if self.brain(x, y, epoch) % FIRE_CHANCE_P == 0 {
+                    self.grid[i].burn = FIRE_LEN;
+                    self.grid[i].food = self.grid[i].food.min(2.0);
+                    self.fire_cells.push(i);
+                    self.fire_spread();
+                }
+            }
+        } else if !self.fire_cells.is_empty() {
             self.fire_spread();
         }
     }
@@ -3888,7 +3960,7 @@ impl Sim {
                 if ti == home || !self.towns[ti].alive {
                     continue;
                 }
-                if self.towns[ti].stocks.food < WASTE_FOOD && self.towns[ti].stocks.water < WASTE_WATER && self.pop(ti) == 0 {
+                if self.towns[ti].stocks.food < WASTE_FOOD && self.towns[ti].stocks.water < WASTE_WATER && self.town_pop[ti] == 0 {
                     continue;
                 }
                 if self.towns[home].at_war && self.towns[home].enemy == Some(ti) {
@@ -4114,8 +4186,8 @@ impl Sim {
                     }
                 }
                 if self.towns[i].raiders <= 0 {
-                    if self.pop(i) >= ARMY_TARGETS_POP {
-                        let count = ((self.pop(i) as f32 * 0.3).min(6.0)) as u32;
+                    if self.town_pop[i] >= ARMY_TARGETS_POP {
+                        let count = ((self.town_pop[i] as f32 * 0.3).min(6.0)) as u32;
                         self.muster_army(i, count);
                     } else if self.towns[i].stocks.food < 12.0 && self.towns[i].stocks.water < 8.0 {
                         self.end_war(i);
@@ -4141,7 +4213,7 @@ impl Sim {
         if !self.towns[ti].alive {
             return;
         }
-        if self.pop(ti) < WAR_START_POP {
+                if self.town_pop[ti] < WAR_START_POP {
             return;
         }
         {
@@ -4156,7 +4228,7 @@ impl Sim {
                 || self.towns[j].at_war
                 || !self.neighbors(ti, j)
                 || self.peaceful(ti, j)
-                || self.pop(j) < RAID_TARGET_POP
+                || self.town_pop[j] < RAID_TARGET_POP
             {
                 continue;
             }
@@ -4387,7 +4459,7 @@ impl Sim {
             if needs.is_empty() {
                 continue;
             }
-            let pop_ti = self.pop(ti);
+            let pop_ti = self.town_pop[ti];
             if pop_ti < 5 {
                 continue;
             }
@@ -4410,14 +4482,15 @@ impl Sim {
     }
 
     fn sync_families(&mut self) {
-        for fam in self.families.iter_mut() {
-            let members = self
-                .agents
-                .iter()
-                .filter(|a| a.family == fam.id)
-                .count() as u32;
-            fam.members = members;
-            fam.extinct = members == 0;
+        let mut counts = vec![0u32; self.families.len()];
+        for a in &self.agents {
+            if a.family < counts.len() {
+                counts[a.family] += 1;
+            }
+        }
+        for (i, fam) in self.families.iter_mut().enumerate() {
+            fam.members = counts[i];
+            fam.extinct = counts[i] == 0;
         }
     }
 }
@@ -4903,6 +4976,7 @@ mod tests {
         s.agents.retain(|a| a.home != 0);
         s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.towns[0].waste = TOWN_WASTE_NEED - 1;
+        s.rebuild_cache();
         s.tick_count = TOWNS_EVERY * 3;
         s.town_lifecycle();
         assert!(!s.towns[0].alive, "abandoned town should be ruined");
@@ -4922,6 +4996,7 @@ mod tests {
             s.spawn_agent(0, tx, ty, 0, false);
         }
         s.towns[0].stocks = Stock { food: 300.0, water: 200.0, ore: 40.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 0.0 };
+        s.rebuild_cache();
         let start = s.towns.len();
         let mut founded = false;
         for k in 1..200 {
@@ -5761,7 +5836,8 @@ mod tests {
         let mut outbreak = false;
         for _ in 0..30000 {
             s.tick_count += 1;
-            s.plague_step();
+            let sp = s.build_spatial();
+            s.plague_step(&sp);
             if s.towns[0].plague_until > 0 {
                 outbreak = true;
                 break;
@@ -5781,7 +5857,8 @@ mod tests {
         s.agents[1].y = s.agents[0].y;
         s.agents[1].sick = 200;
         for _ in 0..200 {
-            s.heal_step();
+            let sp = s.build_spatial();
+            s.heal_step(&sp);
         }
         assert_eq!(s.agents[1].sick, 0, "healer should cure a sick neighbor");
     }
@@ -5795,7 +5872,8 @@ mod tests {
         s.towns[0].built.push(BuildingKind::Clinic);
         let _ = s.wander(&s.agents[0]);
         for _ in 0..60 {
-            s.heal_step();
+            let sp = s.build_spatial();
+            s.heal_step(&sp);
         }
         assert_eq!(s.agents[0].sick, 0, "clinic should slowly cure residents");
     }
@@ -6351,6 +6429,7 @@ fn marriages_form_and_cheapen_births() {
             .unwrap();
         s.grid[fi].burn = FIRE_LEN;
         s.grid[fi].food = 8.0;
+        s.fire_cells.push(fi);
         let (fx, fy) = (fi as i32 % W as i32, fi as i32 / W as i32);
         let mut saw_burn = false;
         let mut saw_spread = false;
@@ -6389,7 +6468,7 @@ fn marriages_form_and_cheapen_births() {
             c.gold = 0.0;
         }
         let mut any = false;
-        for e in 1..40u64 {
+        for e in 1..20000u64 {
             s.tick_count = e * FIRE_EVERY;
             s.fire_step();
             if s.grid.iter().any(|c| c.burn > 0) {
