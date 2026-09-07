@@ -1,0 +1,12 @@
+
+running 1 test
+test sim::tests::balance_20_sessions_200_years has been running for over 60 seconds
+test sim::tests::balance_20_sessions_200_years ... FAILED
+
+failures:
+
+failures:
+    sim::tests::balance_20_sessions_200_years
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 104 filtered out; finished in 13245.95s
+

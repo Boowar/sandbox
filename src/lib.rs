@@ -625,7 +625,7 @@ impl App {
             "F7" => self.hud.show_caravans = !self.hud.show_caravans,
             "Tab" => self.hud.show_tech_tree = !self.hud.show_tech_tree,
             "[" => { self.hud.hud_font_size = (self.hud.hud_font_size - 1.0).max(7.0); }
-            "]" => { self.hud.hud_font_size = (self.hud.hud_font_size + 1.0).min(20.0); }
+            "]" => { self.hud.hud_font_size = (self.hud.hud_font_size + 1.0).min(28.0); }
             _ => {}
         }
     }

@@ -29,7 +29,7 @@ impl Default for HudConfig {
             show_caravans: true,
             show_weather: true,
             show_tech_tree: false,
-            hud_font_size: 11.0,
+            hud_font_size: 13.0,
         }
     }
 }
@@ -1168,7 +1168,7 @@ for a in &sim.animals {
     lines.push(format!("{} {:.0}s  x{:.1}  fps{:.0}{}", weather_name, sim.weather_left * 0.08, speed, fps, if paused { " [PAUSED]" } else { "" }));
     line_colors.push(None);
 
-    let pw = 350.0;
+    let pw = (350.0 + (hud.hud_font_size - 11.0) * 12.0).max(350.0);
     let line_h = hud.hud_font_size + 4.0;
     let ph = 14.0 + lines.len() as f64 * line_h;
     ctx.set_fill_style_str("rgba(10,14,18,0.78)");

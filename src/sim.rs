@@ -1720,16 +1720,27 @@ impl Sim {
             let apply = {
                 let t = &mut self.towns[ti];
                 if t.queue.is_empty() && pop_ti > 0 {
-                    let has = |k: BuildingKind| t.built.iter().any(|b| *b == k);
+                    let count = |k: BuildingKind| t.built.iter().filter(|b| **b == k).count();
                     let need = |k: BuildingKind| t.queue.iter().any(|(q, _)| *q == k);
+                    let has = |k: BuildingKind| count(k) > 0;
                     if !has(BuildingKind::Well) && !need(BuildingKind::Well) {
                         t.queue.push((BuildingKind::Well, 0.0));
                     } else if !has(BuildingKind::Sawmill) && !need(BuildingKind::Sawmill) && t.stocks.wood < 20.0 {
                         t.queue.push((BuildingKind::Sawmill, 0.0));
-                    } else if pop_ti >= t.cap && !need(BuildingKind::House) {
-                        t.queue.push((BuildingKind::House, 0.0));
                     } else if !has(BuildingKind::Farm) && !need(BuildingKind::Farm) {
                         t.queue.push((BuildingKind::Farm, 0.0));
+                    } else if pop_ti >= t.cap && !need(BuildingKind::House) {
+                        t.queue.push((BuildingKind::House, 0.0));
+                    } else if count(BuildingKind::Farm) < (pop_ti / 8 + 1) as usize
+                        && t.stocks.food < stock_cap(&t.built, ResourceKind::Food) * 0.3
+                        && !need(BuildingKind::Farm)
+                    {
+                        t.queue.push((BuildingKind::Farm, 0.0));
+                    } else if count(BuildingKind::Well) < (pop_ti / 10 + 1) as usize
+                        && t.stocks.water < stock_cap(&t.built, ResourceKind::Water) * 0.3
+                        && !need(BuildingKind::Well)
+                    {
+                        t.queue.push((BuildingKind::Well, 0.0));
                     } else if t.stocks.food > AUTO_TRADEPOST_FOOD && t.stocks.water > AUTO_TRADEPOST_WATER
                         && !has(BuildingKind::TradePost) && !need(BuildingKind::TradePost)
                     {
@@ -1742,32 +1753,40 @@ impl Sim {
                         && t.faith >= AUTO_SANCTUARY_FAITH
                     {
                         t.queue.push((BuildingKind::Sanctuary, 0.0));
-                    } else if t.at_war && !has(BuildingKind::Wall) && !need(BuildingKind::Wall) {
+                    } else if t.at_war && count(BuildingKind::Wall) < 3 && !need(BuildingKind::Wall) {
                         t.queue.push((BuildingKind::Wall, 0.0));
-                    } else if t.at_war && !has(BuildingKind::Barracks) && !need(BuildingKind::Barracks) {
+                    } else if t.at_war && count(BuildingKind::Barracks) < 2 && !need(BuildingKind::Barracks) {
                         t.queue.push((BuildingKind::Barracks, 0.0));
                     } else if pop_ti >= AUTO_UNI_POP && !has(BuildingKind::University) && !need(BuildingKind::University) {
                         t.queue.push((BuildingKind::University, 0.0));
-                    } else if pop_ti >= AUTO_SMITHY_POP && !has(BuildingKind::Smithy) && !need(BuildingKind::Smithy) {
+                    } else if pop_ti >= AUTO_SMITHY_POP && count(BuildingKind::Smithy) < 2 && !need(BuildingKind::Smithy) {
                         t.queue.push((BuildingKind::Smithy, 0.0));
                     } else if pop_ti >= AUTO_LIBRARY_POP && t.stocks.gold >= AUTO_LIBRARY_GOLD
-                        && !has(BuildingKind::Library) && !need(BuildingKind::Library)
+                        && count(BuildingKind::Library) < 2 && !need(BuildingKind::Library)
                     {
                         t.queue.push((BuildingKind::Library, 0.0));
                     } else if has(BuildingKind::Sanctuary) && t.faith >= 25.0
                         && !has(BuildingKind::Temple) && !need(BuildingKind::Temple)
                     {
                         t.queue.push((BuildingKind::Temple, 0.0));
-                    } else if t.stocks.food > stock_cap(&t.built, ResourceKind::Food) * 0.60
-                        && !has(BuildingKind::Warehouse) && !need(BuildingKind::Warehouse)
+                    } else if t.stocks.food > stock_cap(&t.built, ResourceKind::Food) * 0.70
+                        && count(BuildingKind::Warehouse) < 4 && !need(BuildingKind::Warehouse)
                     {
                         t.queue.push((BuildingKind::Warehouse, 0.0));
-                    } else if t.at_war && !has(BuildingKind::Fence) && !need(BuildingKind::Fence) {
+                    } else if t.at_war && count(BuildingKind::Fence) < 3 && !need(BuildingKind::Fence) {
                         t.queue.push((BuildingKind::Fence, 0.0));
-                    } else if t.at_war && pop_ti >= AUTO_UNI_POP && !has(BuildingKind::Outpost) && !need(BuildingKind::Outpost) {
+                    } else if t.at_war && pop_ti >= AUTO_UNI_POP
+                        && count(BuildingKind::Outpost) < 2 && !need(BuildingKind::Outpost)
+                    {
                         t.queue.push((BuildingKind::Outpost, 0.0));
                     } else if pop_ti >= t.cap && has(BuildingKind::House) && !need(BuildingKind::House) {
                         t.queue.push((BuildingKind::House, 0.0));
+                    } else if pop_ti >= 20 && count(BuildingKind::Sawmill) < 3
+                        && !need(BuildingKind::Sawmill)
+                    {
+                        t.queue.push((BuildingKind::Sawmill, 0.0));
+                    } else if pop_ti >= 15 && !has(BuildingKind::Farm) && !need(BuildingKind::Farm) {
+                        t.queue.push((BuildingKind::Farm, 0.0));
                     }
                 }
                 if t.queue.is_empty() {
@@ -6615,6 +6634,90 @@ fn marriages_form_and_cheapen_births() {
             }
             if found_forest { break; }
         }
+    }
+
+    #[test]
+    fn balance_10_sessions_500_years() {
+        const SESSIONS: usize = 10;
+        const YEARS: u64 = 500;
+        const YEAR_SNAP: u64 = SEASON_LEN * 4;
+        let mut all_session = Vec::new();
+        for seed in 1..=SESSIONS as u64 {
+            let mut s = Sim::new(seed);
+            let mut peak_pop = 0usize;
+            let mut min_pop = usize::MAX;
+            let pop_start = s.agents.len();
+            let mut yearly_pops: Vec<usize> = Vec::new();
+            let mut yearly_towns: Vec<usize> = Vec::new();
+            for _yr in 0..YEARS {
+                for _ in 0..YEAR_SNAP {
+                    s.tick();
+                    let pop = s.agents.len();
+                    if pop > peak_pop { peak_pop = pop; }
+                    if pop > 0 && pop < min_pop { min_pop = pop; }
+                }
+                yearly_pops.push(s.agents.len());
+                yearly_towns.push(s.towns.iter().filter(|t| t.alive).count());
+            }
+            let pop_end = s.agents.len();
+            let alive_towns_end = s.towns.iter().filter(|t| t.alive).count();
+            let total_food: f32 = s.towns.iter().filter(|t| t.alive).map(|t| t.stocks.food).sum();
+            let total_water: f32 = s.towns.iter().filter(|t| t.alive).map(|t| t.stocks.water).sum();
+            let total_ore: f32 = s.towns.iter().filter(|t| t.alive).map(|t| t.stocks.ore).sum();
+            let total_gold: f32 = s.towns.iter().filter(|t| t.alive).map(|t| t.stocks.gold).sum();
+            let techs: usize = s.towns.iter().filter(|t| t.alive).map(|t| t.researched.len()).sum();
+            let empires = s.empires.iter().filter(|e| !e.members.is_empty()).count();
+            let total_bldgs: usize = s.towns.iter().filter(|t| t.alive).map(|t| t.built.len()).sum();
+            let mut bldg_dist: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for t in s.towns.iter().filter(|t| t.alive) {
+                for b in &t.built {
+                    let name = format!("{:?}", b);
+                    *bldg_dist.entry(name).or_insert(0) += 1;
+                }
+            }
+            let pop50 = yearly_pops.get(49).copied().unwrap_or(0);
+            let pop100 = yearly_pops.get(99).copied().unwrap_or(0);
+            let pop200 = yearly_pops.get(199).copied().unwrap_or(0);
+            let pop300 = yearly_pops.get(299).copied().unwrap_or(0);
+            let pop400 = yearly_pops.get(399).copied().unwrap_or(0);
+            let pop500 = yearly_pops.get(499).copied().unwrap_or(0);
+            eprintln!(
+                "S{:2}: pop {:3}->{:3} (peak {:3})  towns {}/{}  food {:.0}  water {:.0}  ore {:.0}  gold {:.0}  techs {}  emp {}  bldgs {}",
+                seed, pop_start, pop_end, peak_pop,
+                alive_towns_end, s.towns.len(),
+                total_food, total_water, total_ore, total_gold, techs, empires, total_bldgs
+            );
+            eprintln!(
+                "  Y50:{} Y100:{} Y200:{} Y300:{} Y400:{} Y500:{}",
+                pop50, pop100, pop200, pop300, pop400, pop500
+            );
+            let mut dist_sorted: Vec<_> = bldg_dist.into_iter().collect();
+            dist_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            let dist_str: String = dist_sorted.iter().map(|(k, v)| format!("{}:{}", k, v)).collect::<Vec<_>>().join(" ");
+            eprintln!("  buildings: {}", dist_str);
+            all_session.push((seed, pop_start, pop_end, peak_pop, alive_towns_end, yearly_pops, yearly_towns));
+        }
+        let total_start: usize = all_session.iter().map(|(_, ps, _, _, _, _, _)| *ps).sum();
+        let total_end: usize = all_session.iter().map(|(_, _, pe, _, _, _, _)| *pe).sum();
+        let avg_pop = total_end as f64 / SESSIONS as f64;
+        let extinctions = all_session.iter().filter(|(_, _, pe, _, _, _, _)| *pe == 0).count();
+        let towns_alive: usize = all_session.iter().map(|(_, _, _, _, ta, _, _)| ta).sum();
+        let peaks: Vec<usize> = all_session.iter().map(|(_, _, _, pk, _, _, _)| *pk).collect();
+        let avg_peak = peaks.iter().sum::<usize>() as f64 / SESSIONS as f64;
+        let avg_yr100: f64 = all_session.iter().map(|(_, _, _, _, _, yp, _)| yp.get(99).copied().unwrap_or(0) as f64).sum::<f64>() / SESSIONS as f64;
+        let avg_yr200: f64 = all_session.iter().map(|(_, _, _, _, _, yp, _)| yp.get(199).copied().unwrap_or(0) as f64).sum::<f64>() / SESSIONS as f64;
+        let avg_yr500: f64 = all_session.iter().map(|(_, _, _, _, _, yp, _)| yp.get(499).copied().unwrap_or(0) as f64).sum::<f64>() / SESSIONS as f64;
+        eprintln!("═══════════════════════════════════════════════════════════");
+        eprintln!("10 SESSIONS x 500 YEARS RESULTS");
+        eprintln!("═══════════════════════════════════════════════════════════");
+        eprintln!("Total pop: {} -> {} ({:.1}x)", total_start, total_end, total_end as f64 / total_start.max(1) as f64);
+        eprintln!("Avg pop end: {:.0}  extinctions: {}/{}", avg_pop, extinctions, SESSIONS);
+        eprintln!("Avg peak: {:.0}  Alive towns: {}/{}", avg_peak, towns_alive, SESSIONS * 10);
+        eprintln!("Avg pop Y100: {:.0}  Y200: {:.0}  Y500: {:.0}", avg_yr100, avg_yr200, avg_yr500);
+        eprintln!("═══════════════════════════════════════════════════════════");
+        assert!(avg_pop > 30.0, "average pop too low after 500y: {:.0}", avg_pop);
+        assert!(extinctions <= 1, "too many extinctions: {}/{}", extinctions, SESSIONS);
+        assert!(towns_alive >= SESSIONS * 5, "too few alive towns: {}/{}", towns_alive, SESSIONS * 10);
     }
 
     #[test]
