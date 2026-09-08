@@ -772,6 +772,27 @@ pub fn draw(
             let sy = by + (i / 6) as f64 * 8.0;
             draw_building(ctx, sx, sy, *k, tr, tg, tb);
         }
+        for obj in t.objects.iter() {
+            match obj.kind {
+                crate::sim::MapObjectKind::Fence => {
+                    ctx.set_fill_style_str("rgb(160,120,60)");
+                    for k in 0..3 {
+                        let ox = obj.x as f64 * CELL + (k as f64 - 1.0) * 2.0;
+                        ctx.fill_rect(ox, obj.y as f64 * CELL + 3.0, 2.0, 2.0);
+                    }
+                }
+                crate::sim::MapObjectKind::Outpost => {
+                    let ox = obj.x as f64 * CELL;
+                    let oy = obj.y as f64 * CELL;
+                    ctx.set_fill_style_str("rgb(120,100,70)");
+                    ctx.fill_rect(ox, oy + 2.0, 8.0, 4.0);
+                    ctx.set_fill_style_str("rgb(90,75,50)");
+                    ctx.fill_rect(ox + 2.0, oy, 4.0, 2.0);
+                    ctx.set_fill_style_str("rgb(200,170,110)");
+                    ctx.fill_rect(ox + 3.0, oy - 2.0, 2.0, 2.0);
+                }
+            }
+        }
         if let Some((fl, ft)) = build_flash {
             if fl == i && ft > 0.0 {
                 ctx.set_stroke_style_str(&format!("rgba(255,255,255,{:.2})", ft * 0.9));
@@ -1233,8 +1254,8 @@ for a in &sim.animals {
             let temple = build_counts(crate::sim::BuildingKind::Temple);
             let warehouse = build_counts(crate::sim::BuildingKind::Warehouse);
             let sawmill = build_counts(crate::sim::BuildingKind::Sawmill);
-            let fence = build_counts(crate::sim::BuildingKind::Fence);
-            let outpost = build_counts(crate::sim::BuildingKind::Outpost);
+            let fence = t.objects.iter().filter(|o| o.kind == crate::sim::MapObjectKind::Fence).count();
+            let outpost = t.objects.iter().filter(|o| o.kind == crate::sim::MapObjectKind::Outpost).count();
             let bless_name = match t.blessing {
                 crate::sim::Blessing::Fertility => "плодородие",
                 crate::sim::Blessing::Abundance => "изобилие",

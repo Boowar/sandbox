@@ -359,6 +359,14 @@ impl SettlementTier {
             SettlementTier::Settlement
         }
     }
+
+    pub fn max_radius(self) -> i32 {
+        match self {
+            SettlementTier::Settlement => 5,
+            SettlementTier::Village => 9,
+            SettlementTier::City => 13,
+        }
+    }
 }
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
@@ -496,6 +504,28 @@ impl BuildingKind {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+pub enum MapObjectKind {
+    Fence,
+    Outpost,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub struct MapObject {
+    pub kind: MapObjectKind,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl MapObject {
+    pub fn extra_radius(self) -> i32 {
+        match self.kind {
+            MapObjectKind::Fence => FENCE_RADIUS,
+            MapObjectKind::Outpost => OUTPOST_RADIUS,
+        }
+    }
+}
+
 fn warehouse_count(built: &[BuildingKind]) -> i32 {
     built.iter().filter(|b| **b == BuildingKind::Warehouse).count() as i32
 }
@@ -602,7 +632,7 @@ pub struct Agent {
     pub age: u32,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Settlement {
     pub x: i32,
     pub y: i32,
@@ -631,6 +661,8 @@ pub struct Settlement {
     pub waste: u64,
     pub dev: f32,
     pub tier: SettlementTier,
+    #[serde(default)]
+    pub objects: Vec<MapObject>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1146,6 +1178,7 @@ impl Sim {
                 waste: 0,
                 dev: 0.0,
                 tier: SettlementTier::Settlement,
+                objects: Vec::new(),
             });
             let base = self.families.len();
             for k in 0..FAMILIES_PER_TOWN {
@@ -1748,6 +1781,7 @@ impl Sim {
                 let t = &mut self.towns[ti];
                 if t.queue.is_empty() && pop_ti > 0 {
                     let count = |k: BuildingKind| t.built.iter().filter(|b| **b == k).count();
+                    let obj_count = |k: MapObjectKind| t.objects.iter().filter(|o| o.kind == k).count();
                     let need = |k: BuildingKind| t.queue.iter().any(|(q, _)| *q == k);
                     let has = |k: BuildingKind| count(k) > 0;
                     if !has(BuildingKind::Well) && !need(BuildingKind::Well) {
@@ -1800,10 +1834,10 @@ impl Sim {
                         && count(BuildingKind::Warehouse) < 4 && !need(BuildingKind::Warehouse)
                     {
                         t.queue.push((BuildingKind::Warehouse, 0.0));
-                    } else if t.at_war && count(BuildingKind::Fence) < 3 && !need(BuildingKind::Fence) {
+                    } else if t.at_war && obj_count(MapObjectKind::Fence) < 3 && !need(BuildingKind::Fence) {
                         t.queue.push((BuildingKind::Fence, 0.0));
                     } else if t.at_war && pop_ti >= AUTO_UNI_POP
-                        && count(BuildingKind::Outpost) < 2 && !need(BuildingKind::Outpost)
+                        && obj_count(MapObjectKind::Outpost) < 2 && !need(BuildingKind::Outpost)
                     {
                         t.queue.push((BuildingKind::Outpost, 0.0));
                     } else if pop_ti >= t.cap && has(BuildingKind::House) && !need(BuildingKind::House) {
@@ -1843,73 +1877,167 @@ impl Sim {
                 }
             };
             if let Some(k) = apply {
-                if k == BuildingKind::House {
-                    self.towns[ti].cap += HOUSE_CAP_BONUS;
-                }
-                if k == BuildingKind::Farm {
-                    let (x, y) = {
-                        let t = &self.towns[ti];
-                        (t.x, t.y)
+                if k == BuildingKind::Fence || k == BuildingKind::Outpost {
+                    let obj_kind = match k {
+                        BuildingKind::Fence => MapObjectKind::Fence,
+                        _ => MapObjectKind::Outpost,
                     };
-                    self.plant_fields(x, y);
-                }
-                if k == BuildingKind::Sanctuary {
-                    if !self.towns[ti].built.iter().any(|b| *b == BuildingKind::Sanctuary) {
-                        self.promote_role(ti, Role::Priest, &[Role::Worker]);
+                    if let Some((px, py)) = self.place_map_object(ti, obj_kind) {
+                        self.towns[ti].objects.push(MapObject { kind: obj_kind, x: px, y: py });
                     }
+                } else {
+                    if k == BuildingKind::House {
+                        self.towns[ti].cap += HOUSE_CAP_BONUS;
+                    }
+                    if k == BuildingKind::Farm {
+                        let (x, y) = {
+                            let t = &self.towns[ti];
+                            (t.x, t.y)
+                        };
+                        self.plant_fields(x, y);
+                    }
+                    if k == BuildingKind::Sanctuary {
+                        if !self.towns[ti].built.iter().any(|b| *b == BuildingKind::Sanctuary) {
+                            self.promote_role(ti, Role::Priest, &[Role::Worker]);
+                        }
+                    }
+                    if k == BuildingKind::Clinic {
+                        self.promote_role(ti, Role::Healer, &[Role::Worker, Role::Hunter]);
+                    }
+                    if k == BuildingKind::Barracks {
+                        self.promote_role(ti, Role::Guard, &[Role::Worker, Role::Hunter, Role::Builder]);
+                    }
+                    if k == BuildingKind::Temple {
+                        self.promote_role(ti, Role::Prophet, &[Role::Priest]);
+                    }
+                    if k == BuildingKind::University {
+                        self.promote_role(ti, Role::Scholar, &[Role::Worker, Role::Hunter, Role::Builder]);
+                    }
+                    if k == BuildingKind::Smithy {
+                        self.promote_role(ti, Role::Builder, &[Role::Worker, Role::Hunter, Role::Builder]);
+                    }
+                    self.towns[ti].built.push(k);
                 }
-                if k == BuildingKind::Clinic {
-                    self.promote_role(ti, Role::Healer, &[Role::Worker, Role::Hunter]);
-                }
-                if k == BuildingKind::Barracks {
-                    self.promote_role(ti, Role::Guard, &[Role::Worker, Role::Hunter, Role::Builder]);
-                }
-                if k == BuildingKind::Temple {
-                    self.promote_role(ti, Role::Prophet, &[Role::Priest]);
-                }
-                if k == BuildingKind::University {
-                    self.promote_role(ti, Role::Scholar, &[Role::Worker, Role::Hunter, Role::Builder]);
-                }
-                if k == BuildingKind::Smithy {
-                    self.promote_role(ti, Role::Builder, &[Role::Worker, Role::Hunter, Role::Builder]);
-                }
-                self.towns[ti].built.push(k);
             }
         }
     }
 
+    fn place_map_object(&self, ti: usize, kind: MapObjectKind) -> Option<(i32, i32)> {
+        let tx = self.towns[ti].x;
+        let ty = self.towns[ti].y;
+        let base = self.settlement_radius(ti);
+        let ring_off = match kind {
+            MapObjectKind::Fence => 1,
+            MapObjectKind::Outpost => 2,
+        };
+        let mut best: Option<(i32, i32, i64)> = None;
+        for radius in (base + 1)..=(base + 4) {
+            let step = (radius * 12).max(8) as usize;
+            for i in 0..step {
+                let angle = i as f64 * std::f64::consts::TAU / step as f64;
+                let x = tx + (angle.cos() * (radius + ring_off) as f64).round() as i32;
+                let y = ty + (angle.sin() * (radius + ring_off) as f64).round() as i32;
+                if !in_bounds(x, y) {
+                    continue;
+                }
+                if !self.grid[idx(x, y)].terrain.walkable() {
+                    continue;
+                }
+                let mut busy = false;
+                if self.territory[idx(x, y)] >= 0 && self.territory[idx(x, y)] as usize != ti {
+                    busy = true;
+                }
+                if !busy {
+                    for o in self.towns[ti].objects.iter() {
+                        if ((o.x - x).abs() + (o.y - y).abs()) < 2 {
+                            busy = true;
+                            break;
+                        }
+                    }
+                }
+                if !busy {
+                    for j in 0..self.towns.len() {
+                        if j == ti || !self.towns[j].alive {
+                            continue;
+                        }
+                        let dx = x - self.towns[j].x;
+                        let dy = y - self.towns[j].y;
+                        if dx * dx + dy * dy <= 9 {
+                            busy = true;
+                            break;
+                        }
+                    }
+                }
+                if busy {
+                    continue;
+                }
+                let dist = (x as i64 - tx as i64).pow(2) + (y as i64 - ty as i64).pow(2);
+                if best.map_or(true, |(_, _, bd)| dist < bd) {
+                    best = Some((x, y, dist));
+                }
+            }
+            if best.is_some() {
+                break;
+            }
+        }
+        if let Some((x, y, _)) = best {
+            Some((x, y))
+        } else {
+            None
+        }
+    }
+
     pub fn settlement_radius(&self, ti: usize) -> i32 {
-        let buildings = self.towns[ti].built.len() as i32;
-        let fence_extra = self.towns[ti].built.iter()
-            .filter(|b| **b == BuildingKind::Fence)
-            .count() as i32 * FENCE_RADIUS;
-        let outpost_extra = self.towns[ti].built.iter()
-            .filter(|b| **b == BuildingKind::Outpost)
-            .count() as i32 * OUTPOST_RADIUS;
-        5 + buildings * 2 + fence_extra + outpost_extra
+        self.towns[ti].tier.max_radius()
     }
 
     pub fn recalc_territory(&mut self) {
         self.territory = vec![-1; W * H];
+        let mut best_dist: Vec<i32> = vec![i32::MAX; W * H];
+        let mut best_tier: Vec<i8> = vec![-1; W * H];
+        let mut best_pop: Vec<i32> = vec![-1; W * H];
         for ti in 0..self.towns.len() {
             if !self.towns[ti].alive {
                 continue;
             }
             let tx = self.towns[ti].x;
             let ty = self.towns[ti].y;
-            let radius = self.settlement_radius(ti);
-            let owner = ti as i8;
-            for dy in -radius..=radius {
-                for dx in -radius..=radius {
-                    let x = tx + dx;
-                    let y = ty + dy;
-                    if in_bounds(x, y) {
-                        let dist_sq = (dx * dx + dy * dy) as f32;
-                        if dist_sq <= (radius * radius) as f32 {
-                            self.territory[idx(x, y)] = owner;
+            let base = self.settlement_radius(ti);
+            let tier_rank = match self.towns[ti].tier {
+                SettlementTier::Settlement => 0,
+                SettlementTier::Village => 1,
+                SettlementTier::City => 2,
+            };
+            let pop = self.town_pop[ti] as i32;
+            let mut claim = |cx: i32, cy: i32, radius: i32| {
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        let x = cx + dx;
+                        let y = cy + dy;
+                        if !in_bounds(x, y) {
+                            continue;
+                        }
+                        let d = dx.abs().max(dy.abs());
+                        if d > radius {
+                            continue;
+                        }
+                        let i = idx(x, y);
+                        if d < best_dist[i]
+                            || (d == best_dist[i]
+                                && (tier_rank as i8 > best_tier[i]
+                                    || (tier_rank as i8 == best_tier[i] && pop > best_pop[i])))
+                        {
+                            best_dist[i] = d;
+                            best_tier[i] = tier_rank as i8;
+                            best_pop[i] = pop;
+                            self.territory[i] = ti as i8;
                         }
                     }
                 }
+            };
+            claim(tx, ty, base);
+            for obj in &self.towns[ti].objects {
+                claim(obj.x, obj.y, obj.extra_radius());
             }
         }
     }
@@ -2299,9 +2427,44 @@ impl Sim {
 
     pub fn load_json(json: &str) -> Option<Self> {
         let mut sim: Self = serde_json::from_str(json).ok()?;
+        sim.migrate_legacy_fence_objects();
         sim.rebuild_cache();
         sim.rebuild_fire_cells();
         Some(sim)
+    }
+
+    fn migrate_legacy_fence_objects(&mut self) {
+        let mut needs_place: Vec<(usize, MapObjectKind)> = Vec::new();
+        for ti in 0..self.towns.len() {
+            if !self.towns[ti].objects.is_empty() {
+                continue;
+            }
+            let mut leftover: Vec<BuildingKind> = Vec::new();
+            for k in self.towns[ti].built.drain(..) {
+                match k {
+                    BuildingKind::Fence => needs_place.push((ti, MapObjectKind::Fence)),
+                    BuildingKind::Outpost => needs_place.push((ti, MapObjectKind::Outpost)),
+                    _ => leftover.push(k),
+                }
+            }
+            self.towns[ti].built = leftover;
+        }
+        for (ti, kind) in needs_place {
+            if let Some((px, py)) = self.place_map_object(ti, kind) {
+                let obj = MapObject { kind, x: px, y: py };
+                let t = &mut self.towns[ti];
+                t.objects.push(obj);
+            } else {
+                // не удалось разместить — оставляем как legacy-здание в built, чтобы не потерять
+                match kind {
+                    MapObjectKind::Fence => self.towns[ti].built.push(BuildingKind::Fence),
+                    MapObjectKind::Outpost => self.towns[ti].built.push(BuildingKind::Outpost),
+                }
+            }
+        }
+        if self.towns.iter().any(|t| !t.objects.is_empty()) {
+            self.recalc_territory();
+        }
     }
 
     fn rebuild_fire_cells(&mut self) {
@@ -3588,6 +3751,7 @@ impl Sim {
                 waste: 0,
                 dev: 0.0,
                 tier: SettlementTier::Settlement,
+                objects: Vec::new(),
             });
         let ti = self.towns.len() - 1;
         let fid = self.families.len();
@@ -4341,7 +4505,12 @@ impl Sim {
             match k {
                 BuildingKind::Wall => b += DEFENSE_WALL_BONUS,
                 BuildingKind::Barracks => b += DEFENSE_BARRACKS_BONUS,
-                BuildingKind::Fence => b += FENCE_DEFENSE,
+                _ => {}
+            }
+        }
+        for obj in self.towns[ti].objects.iter() {
+            match obj.kind {
+                MapObjectKind::Fence => b += FENCE_DEFENSE,
                 _ => {}
             }
         }
@@ -6180,6 +6349,7 @@ fn marriages_form_and_cheapen_births() {
                 waste: 0,
                 dev: 0.0,
                 tier: SettlementTier::Settlement,
+                objects: Vec::new(),
             });
         }
     }
@@ -6899,17 +7069,17 @@ fn marriages_form_and_cheapen_births() {
     }
 
     #[test]
-    fn settlement_radius_depends_on_buildings() {
+    fn settlement_radius_depends_on_tier() {
         let mut s = Sim::new(1);
-        assert_eq!(s.settlement_radius(0), 5, "no buildings => radius 5");
+        s.towns[0].tier = SettlementTier::Settlement;
+        assert_eq!(s.settlement_radius(0), 5, "Settlement => radius 5");
+        s.towns[0].tier = SettlementTier::Village;
+        assert_eq!(s.settlement_radius(0), 9, "Village => radius 9");
+        s.towns[0].tier = SettlementTier::City;
+        assert_eq!(s.settlement_radius(0), 13, "City => radius 13");
         s.towns[0].built.push(BuildingKind::Well);
-        assert_eq!(s.settlement_radius(0), 7, "1 building => radius 7");
-        s.towns[0].built.push(BuildingKind::Farm);
-        assert_eq!(s.settlement_radius(0), 9, "2 buildings => radius 9");
-        for _ in 0..8 {
-            s.towns[0].built.push(BuildingKind::House);
-        }
-        assert_eq!(s.settlement_radius(0), 25, "10 buildings => radius 25");
+        s.towns[0].built.push(BuildingKind::House);
+        assert_eq!(s.settlement_radius(0), 13, "buildings should not change radius");
     }
 
     #[test]
@@ -6927,16 +7097,14 @@ fn marriages_form_and_cheapen_births() {
     }
 
     #[test]
-    fn territory_updates_after_building() {
+    fn territory_updates_with_tier() {
         let mut s = Sim::new(1);
         s.recalc_territory();
         let r_before = s.settlement_radius(0);
-        s.towns[0].built.push(BuildingKind::Well);
-        s.towns[0].built.push(BuildingKind::Farm);
-        s.towns[0].built.push(BuildingKind::House);
+        s.towns[0].tier = SettlementTier::City;
         s.recalc_territory();
         let r_after = s.settlement_radius(0);
-        assert!(r_after > r_before, "radius should grow with buildings: {} > {}", r_after, r_before);
+        assert!(r_after > r_before, "radius should grow with tier: {} > {}", r_after, r_before);
         let tx = s.towns[0].x;
         let ty = s.towns[0].y;
         assert_eq!(s.territory[idx(tx + r_before + 1, ty)], 0, "newly expanded territory should be owned");
@@ -6969,31 +7137,87 @@ fn marriages_form_and_cheapen_births() {
     fn fence_extends_territory() {
         let mut s = Sim::new(1);
         s.recalc_territory();
-        let r_before = s.settlement_radius(0);
-        s.towns[0].built.push(BuildingKind::Fence);
+        let base = s.settlement_radius(0);
+        let tx = s.towns[0].x;
+        let ty = s.towns[0].y;
+        assert_eq!(s.territory[idx(tx + base, ty)], 0, "base edge owned");
+        assert_eq!(s.territory[idx(tx + base + 1, ty)], -1, "beyond base edge unowned");
+        s.towns[0].objects.push(MapObject { kind: MapObjectKind::Fence, x: tx + base + 1, y: ty });
         s.recalc_territory();
-        let r_after = s.settlement_radius(0);
-        assert!(r_after >= r_before + FENCE_RADIUS,
-            "Fence should add {} radius, got {} from {}", FENCE_RADIUS, r_after, r_before);
+        assert_eq!(
+            s.territory[idx(tx + base + 1, ty)], 0,
+            "Fence object should claim cell beyond base edge"
+        );
     }
 
     #[test]
     fn outpost_extends_territory() {
         let mut s = Sim::new(1);
         s.recalc_territory();
-        let r_before = s.settlement_radius(0);
-        s.towns[0].built.push(BuildingKind::Outpost);
+        let base = s.settlement_radius(0);
+        let tx = s.towns[0].x;
+        let ty = s.towns[0].y;
+        assert_eq!(s.territory[idx(tx + base, ty)], 0, "base edge owned");
+        assert_eq!(s.territory[idx(tx + base + 1, ty)], -1, "beyond base edge unowned");
+        s.towns[0].objects.push(MapObject { kind: MapObjectKind::Outpost, x: tx + base + 2, y: ty });
         s.recalc_territory();
-        let r_after = s.settlement_radius(0);
-        assert!(r_after >= r_before + OUTPOST_RADIUS,
-            "Outpost should add {} radius, got {} from {}", OUTPOST_RADIUS, r_after, r_before);
+        assert_eq!(
+            s.territory[idx(tx + base + 2, ty)], 0,
+            "Outpost object should claim cell beyond base edge"
+        );
+    }
+
+    #[test]
+    fn territories_never_overlap() {
+        let mut s = Sim::new(1);
+        assert!(s.towns.len() >= 2, "test needs >= 2 towns");
+        s.towns[0].x = 40;
+        s.towns[0].y = 40;
+        s.towns[0].tier = SettlementTier::City;
+        s.towns[1].x = 47;
+        s.towns[1].y = 40;
+        s.towns[1].tier = SettlementTier::Village;
+        s.rebuild_cache();
+        s.recalc_territory();
+        for i in 0..W * H {
+            let a = s.territory[i];
+            if a < 0 {
+                continue;
+            }
+            let tx = (i % W) as i32;
+            let ty = (i / W) as i32;
+            let d0 = (tx - 40).abs().max((ty - 40).abs());
+            let d1 = (tx - 47).abs().max((ty - 40).abs());
+            if a == 0 {
+                assert!(d0 <= 13, "town 0 cell must be within its radius");
+            } else if a == 1 {
+                assert!(d1 <= 9, "town 1 cell must be within its radius");
+            }
+        }
+        let mut band = 0;
+        for i in 0..W * H {
+            let tx = (i % W) as i32;
+            let ty = (i / W) as i32;
+            let d0 = (tx - 40).abs().max((ty - 40).abs());
+            let d1 = (tx - 47).abs().max((ty - 40).abs());
+            if d0 <= 13 && d1 <= 9 {
+                band += 1;
+                assert!(
+                    s.territory[i] == 0 || s.territory[i] == 1,
+                    "shared band cell must belong to exactly one town, got {:?}",
+                    s.territory[i]
+                );
+            }
+        }
+        assert!(band > 0, "overlapping band should exist (sanity)");
     }
 
     #[test]
     fn fence_adds_defense() {
         let mut s = Sim::new(1);
         let d_before = s.defense_bonus(0);
-        s.towns[0].built.push(BuildingKind::Fence);
+        let (fx, fy) = (s.towns[0].x, s.towns[0].y);
+        s.towns[0].objects.push(MapObject { kind: MapObjectKind::Fence, x: fx, y: fy });
         let d_after = s.defense_bonus(0);
         assert!(d_after > d_before, "Fence should add defense: {} > {}", d_after, d_before);
     }
