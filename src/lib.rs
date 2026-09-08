@@ -361,6 +361,7 @@ impl App {
         let _ = Url::revoke_object_url(&url);
     }
 
+    #[allow(dead_code)]
     fn upload_save(&mut self) {
         let window = web_sys::window().expect("no window");
         let document = window.document().expect("doc");
