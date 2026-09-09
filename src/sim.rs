@@ -4927,6 +4927,62 @@ mod tests {
     }
 
     #[test]
+    fn construction_builds_fence_as_map_object() {
+        let mut s = Sim::new(15);
+        s.towns[0].stocks.food = 100.0;
+        s.towns[0].stocks.water = 100.0;
+        s.towns[0].stocks.ore = 400.0;
+        s.towns[0].stocks.wood = 300.0;
+        s.build_request(0, BuildingKind::Fence);
+        for _ in 0..FENCE_COST as usize + 5 {
+            s.tick();
+        }
+        assert!(
+            !s.towns[0].objects.is_empty(),
+            "fence should be placed as a map object"
+        );
+        assert_eq!(
+            s.towns[0].objects[0].kind,
+            MapObjectKind::Fence,
+            "object should be a fence"
+        );
+        assert!(
+            !s.towns[0].built.contains(&BuildingKind::Fence),
+            "fence should not remain in built"
+        );
+        assert!(
+            in_bounds(s.towns[0].objects[0].x, s.towns[0].objects[0].y),
+            "fence object must be in bounds"
+        );
+    }
+
+    #[test]
+    fn construction_builds_outpost_as_map_object() {
+        let mut s = Sim::new(15);
+        s.towns[0].stocks.food = 100.0;
+        s.towns[0].stocks.water = 100.0;
+        s.towns[0].stocks.ore = 400.0;
+        s.towns[0].stocks.wood = 300.0;
+        s.build_request(0, BuildingKind::Outpost);
+        for _ in 0..OUTPOST_COST as usize + 5 {
+            s.tick();
+        }
+        assert!(
+            !s.towns[0].objects.is_empty(),
+            "outpost should be placed as a map object"
+        );
+        assert_eq!(
+            s.towns[0].objects[0].kind,
+            MapObjectKind::Outpost,
+            "object should be an outpost"
+        );
+        assert!(
+            !s.towns[0].built.contains(&BuildingKind::Outpost),
+            "outpost should not remain in built"
+        );
+    }
+
+    #[test]
     fn terrain_has_forests_and_water() {
         for seed in 1..=6u64 {
             let s = Sim::new(seed);

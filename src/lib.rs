@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{
     Blob, BlobPropertyBag, CanvasRenderingContext2d, Element, EventTarget,
-    HtmlAnchorElement, HtmlCanvasElement, HtmlInputElement, KeyboardEvent,
+    HtmlAnchorElement, HtmlCanvasElement, HtmlInputElement,
     PointerEvent, Url, WheelEvent,
 };
 
@@ -228,6 +228,15 @@ impl App {
             self.inspire_mode = false;
             self.build_mode = false;
         }
+        self.sync_ui();
+    }
+
+    fn cancel(&mut self) {
+        self.bless_mode = false;
+        self.inspire_mode = false;
+        self.build_mode = false;
+        self.road_mode = false;
+        self.selected_town = None;
         self.sync_ui();
     }
 
@@ -576,60 +585,6 @@ impl App {
         }
     }
 
-    fn on_key(&mut self, e: KeyboardEvent) {
-        match e.key().as_str() {
-            "Escape" => {
-                self.bless_mode = false;
-                self.inspire_mode = false;
-                self.build_mode = false;
-                self.road_mode = false;
-                self.selected_town = None;
-            }
-            " " => self.toggle_pause(),
-            "+" | "=" => self.change_speed(1.0),
-            "-" | "_" | "—" => self.change_speed(-1.0),
-            "b" | "B" | "и" | "И" => self.toggle_bless(),
-            "i" | "I" | "ш" | "Ш" => self.toggle_inspire(),
-            "n" | "N" | "т" | "Т" => self.toggle_build(),
-            "m" | "M" | "ь" | "Ь" => self.cycle_build_terrain(),
-            "d" | "D" | "в" | "В" => self.toggle_road_mode(),
-            "w" | "W" | "ц" | "Ц" => self.cycle_weather(),
-            "1" => self.build(sim::BuildingKind::House),
-            "2" => self.build(sim::BuildingKind::Well),
-            "3" => self.build(sim::BuildingKind::TradePost),
-            "4" => self.build(sim::BuildingKind::Farm),
-            "5" => self.build(sim::BuildingKind::Sanctuary),
-            "6" => self.build(sim::BuildingKind::Clinic),
-            "7" => self.build(sim::BuildingKind::Wall),
-            "8" => self.build(sim::BuildingKind::Barracks),
-            "t" | "T" | "е" | "Е" => self.build(sim::BuildingKind::Temple),
-            "9" => self.build(sim::BuildingKind::University),
-            "0" => self.build(sim::BuildingKind::Smithy),
-            "q" | "Q" | "й" | "Й" => self.build(sim::BuildingKind::Library),
-            "e" | "E" | "у" | "У" => self.build(sim::BuildingKind::Warehouse),
-            "f" | "F" | "а" | "А" => self.build(sim::BuildingKind::Sawmill),
-            "g" | "G" | "п" | "П" => self.build(sim::BuildingKind::Fence),
-            "o" | "O" | "щ" | "Щ" => self.build(sim::BuildingKind::Outpost),
-            "c" | "C" | "с" | "С" => self.breed_cows(),
-            "r" | "R" | "к" | "К" => self.new_world(),
-            "F5" => self.save_to_local(),
-            "F9" => {
-                if !self.load_from_local() {
-                    web_sys::console::log_1(&"No saved world found".into());
-                }
-            }
-            "F1" => self.hud.show_weather = !self.hud.show_weather,
-            "F2" => self.hud.show_buildings = !self.hud.show_buildings,
-            "F3" => self.hud.show_resources = !self.hud.show_resources,
-            "F4" => self.hud.show_diplomacy = !self.hud.show_diplomacy,
-            "F6" => self.hud.show_animals = !self.hud.show_animals,
-            "F7" => self.hud.show_caravans = !self.hud.show_caravans,
-            "Tab" => self.hud.show_tech_tree = !self.hud.show_tech_tree,
-            "[" => { self.hud.hud_font_size = (self.hud.hud_font_size - 1.0).max(7.0); }
-            "]" => { self.hud.hud_font_size = (self.hud.hud_font_size + 1.0).min(28.0); }
-            _ => {}
-        }
-    }
 }
 
 #[wasm_bindgen(start)]
@@ -716,16 +671,6 @@ pub fn start() -> Result<(), JsValue> {
         hud: render::HudConfig::default(),
     }));
     app.borrow().sync_ui();
-
-    let app_key = Rc::clone(&app);
-    let key: Closure<dyn FnMut(KeyboardEvent)> = Closure::wrap(Box::new(
-        move |e: KeyboardEvent| {
-            app_key.borrow_mut().on_key(e);
-        },
-    ) as Box<dyn FnMut(KeyboardEvent)>);
-    window
-        .add_event_listener_with_callback("keydown", key.as_ref().unchecked_ref::<Function>())?;
-    std::mem::forget(key);
 
     {
         let app_pt = Rc::clone(&app);
@@ -881,6 +826,15 @@ pub fn start() -> Result<(), JsValue> {
     bind_click(&document.get_element_by_id("btnTemple").ok_or("no btnTemple")?, &app, |a| {
         a.build(sim::BuildingKind::Temple)
     })?;
+    bind_click(&document.get_element_by_id("btnUni").ok_or("no btnUni")?, &app, |a| {
+        a.build(sim::BuildingKind::University)
+    })?;
+    bind_click(&document.get_element_by_id("btnSmithy").ok_or("no btnSmithy")?, &app, |a| {
+        a.build(sim::BuildingKind::Smithy)
+    })?;
+    bind_click(&document.get_element_by_id("btnLibrary").ok_or("no btnLibrary")?, &app, |a| {
+        a.build(sim::BuildingKind::Library)
+    })?;
     bind_click(&document.get_element_by_id("btnWarehouse").ok_or("no btnWarehouse")?, &app, |a| {
         a.build(sim::BuildingKind::Warehouse)
     })?;
@@ -908,6 +862,17 @@ pub fn start() -> Result<(), JsValue> {
     bind_click(&document.get_element_by_id("btnSave").ok_or("no btnSave")?, &app, |a| {
         a.save_to_local();
         a.download_save();
+    })?;
+    bind_click(&document.get_element_by_id("btnLoad").ok_or("no btnLoad")?, &app, |a| {
+        if !a.load_from_local() {
+            web_sys::console::log_1(&"No saved world found".into());
+        }
+    })?;
+    bind_click(&document.get_element_by_id("btnTerrain").ok_or("no btnTerrain")?, &app, |a| {
+        a.cycle_build_terrain()
+    })?;
+    bind_click(&document.get_element_by_id("btnCancel").ok_or("no btnCancel")?, &app, |a| {
+        a.cancel()
     })?;
 
     let app_loop = Rc::clone(&app);

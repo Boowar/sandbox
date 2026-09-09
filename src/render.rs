@@ -10,7 +10,6 @@ const PH: usize = H * ART * PX;
 #[derive(Clone, Copy, PartialEq)]
 pub struct HudConfig {
     pub show_resources: bool,
-    pub show_buildings: bool,
     pub show_diplomacy: bool,
     pub show_animals: bool,
     pub show_caravans: bool,
@@ -23,7 +22,6 @@ impl Default for HudConfig {
     fn default() -> Self {
         Self {
             show_resources: true,
-            show_buildings: true,
             show_diplomacy: true,
             show_animals: true,
             show_caravans: true,
@@ -36,19 +34,17 @@ impl Default for HudConfig {
 
 impl HudConfig {
     pub fn cycle(&mut self) {
-        if self.show_resources && self.show_buildings && self.show_diplomacy && self.show_animals && self.show_caravans && self.show_weather {
+        if self.show_resources && self.show_diplomacy && self.show_animals && self.show_caravans && self.show_weather {
             self.show_resources = false;
-        } else if !self.show_resources && !self.show_buildings && !self.show_diplomacy && !self.show_animals && !self.show_caravans && !self.show_weather {
+        } else if !self.show_resources && !self.show_diplomacy && !self.show_animals && !self.show_caravans && !self.show_weather {
             *self = Self::default();
         } else {
             if !self.show_resources { self.show_resources = true; return; }
-            if !self.show_buildings { self.show_buildings = true; return; }
             if !self.show_diplomacy { self.show_diplomacy = true; return; }
             if !self.show_animals { self.show_animals = true; return; }
             if !self.show_caravans { self.show_caravans = true; return; }
             if !self.show_weather { self.show_weather = true; return; }
             self.show_resources = false;
-            self.show_buildings = false;
             self.show_diplomacy = false;
             self.show_animals = false;
             self.show_caravans = false;
@@ -979,23 +975,10 @@ for a in &sim.animals {
         ctx.fill_rect(e.x - 1.0, e.y - 1.0, 2.0, 2.0);
     }
 
-    let count_building = |sim: &Sim, kind: crate::sim::BuildingKind| -> usize {
-        sim.towns.iter().map(|t| t.built.iter().filter(|b| **b == kind).count()).sum()
-    };
-    let (houses, wells, farms, posts, clinics, walls, barracks) = (
-        count_building(sim, crate::sim::BuildingKind::House), count_building(sim, crate::sim::BuildingKind::Well),
-        count_building(sim, crate::sim::BuildingKind::Farm), count_building(sim, crate::sim::BuildingKind::TradePost),
-        count_building(sim, crate::sim::BuildingKind::Clinic), count_building(sim, crate::sim::BuildingKind::Wall),
-        count_building(sim, crate::sim::BuildingKind::Barracks),
-    );
-    let temples = count_building(sim, crate::sim::BuildingKind::Temple);
-    let warehouses = count_building(sim, crate::sim::BuildingKind::Warehouse);
-    let sawmills = count_building(sim, crate::sim::BuildingKind::Sawmill);
     let science: f32 = sim.towns.iter().map(|t| t.dev).sum();
     let scholars: usize = sim.agents.iter().filter(|a| a.role == Role::Scholar).count();
     let builders: usize = sim.agents.iter().filter(|a| a.role == Role::Builder).count();
     let sick = sim.agents.iter().filter(|a| a.sick > 0).count();
-    let pending: usize = sim.towns.iter().map(|t| t.queue.len()).sum();
     let wars = sim.towns.iter().filter(|t| t.at_war).count();
     let alliances_n = sim.alliances.iter().filter(|(_, _, until)| *until > sim.tick_count).count();
     let treaties_n = sim.treaties.iter().filter(|(_, _, until)| *until > sim.tick_count).count();
@@ -1029,11 +1012,6 @@ for a in &sim.animals {
     let mood_icon = if avg_mood > 0.3 { "😊" } else if avg_mood < -0.3 { "😠" } else { "😐" };
     lines.push(format!("👥 {}  {} {:.2}  ⚔{} 💀{}", sim.agents.len(), mood_icon, avg_mood, wars, ruins));
     line_colors.push(None);
-
-    if hud.show_buildings {
-        lines.push(format!("🏠{} ⛲{} 🌾{} 🏦{} ⛑{} ⛋{} ⛩{} 🛕{} 📦{} 🪚{}  ⏳{}", houses, wells, farms, posts, clinics, walls, barracks, temples, warehouses, sawmills, pending));
-        line_colors.push(None);
-    }
 
     lines.push(format!("📚 sci {:.0}  👨‍🎓{}  🔨{}  🤝{}", science, scholars, builders, sim.social_links.len()));
     line_colors.push(None);
@@ -1108,9 +1086,7 @@ for a in &sim.animals {
         town_rows.push((row, i));
     }
     if hud.show_caravans {
-        let gold_total: i32 = sim.towns.iter().map(|t| t.stocks.gold as i32).sum();
-        let wood_total: i32 = sim.towns.iter().map(|t| t.stocks.wood as i32).sum();
-        lines.push(format!("💰 {}g  🪵 {}  🐫 caravan {}", gold_total, wood_total, sim.caravans.len()));
+        lines.push(format!("🐫 caravan {}", sim.caravans.len()));
         line_colors.push(None);
     }
 
