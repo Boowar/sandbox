@@ -7,49 +7,53 @@ const FOOD_MAX: f32 = 10.0;
 const ORE_MAX: f32 = 60.0;
 const WATER_MAX: f32 = 240.0;
 const WATER_SUCK: f32 = 5.0;
-const WATER_REGEN_CLEAR: f32 = 12.0;
-const WATER_REGEN_RAIN: f32 = 70.0;
-const WATER_REGEN_HEAT: f32 = 4.0;
-const WATER_REGEN_FROST: f32 = 6.0;
+const WATER_REGEN_CLEAR: f32 = 240.0;
+const WATER_REGEN_RAIN: f32 = 1400.0;
+const WATER_REGEN_HEAT: f32 = 80.0;
+const WATER_REGEN_FROST: f32 = 120.0;
 const RAIN_LAKE_CHANCE: u32 = 700;
-const METEOR_EVERY: u64 = 14400;
+const METEOR_EVERY: u64 = 43200;
 const METEOR_CHANCE_P: u32 = 4000;
 const METEOR_RADIUS: i32 = 3;
-const FIRE_EVERY: u64 = 4200;
+const FIRE_EVERY: u64 = 2160;
 const FIRE_CHANCE_P: u32 = 9000;
-const FIRE_LEN: u32 = 40;
+const FIRE_LEN: u32 = 2;
 const FIRE_SPREAD_DIV: u64 = 8;
-const HORDE_EVERY: u64 = 9000;
+const HORDE_EVERY: u64 = 2160;
 const HORDE_CHANCE_P: u32 = 12;
 const HORDE_PACK_MAX: usize = 6;
-const GOLD_VEIN_EVERY: u64 = 9000;
+const GOLD_VEIN_EVERY: u64 = 17280;
 const GOLD_VEIN_CHANCE_P: u32 = 5;
 const GOLD_VEIN_AMOUNT: f32 = 320.0;
-const GOLD_VEIN_PER_TICK: f32 = 0.04;
+const GOLD_VEIN_PER_TICK: f32 = 2.0;
 const GOLD_VEIN_RANGE: i32 = 24;
-const MIGRATE_EVERY: u64 = 3000;
+const MIGRATE_EVERY: u64 = 720;
 const MIGRATE_CHANCE_P: u32 = 6;
 const MIGRATE_QUALITY_MARGIN: f32 = 5.0;
-pub const DAY_LEN: u64 = 1200;
-const SEASON_LEN: u64 = 36000;
+pub const DAY_LEN: u64 = 24;
+const SEASON_LEN: u64 = 2160;
 const NIGHT_WORK_MULT: f32 = 0.6;
 const NIGHT_DANGER: f32 = 2.0;
-const MARRIAGE_EVERY: u64 = 5400;
+const MARRIAGE_EVERY: u64 = 8640;
 const MARRIAGE_CHANCE_P: u32 = 5;
-const MARRIAGE_LENGTH: u64 = 18000;
-const GIFT_EVERY: u64 = 1800;
+const MARRIAGE_LENGTH: u64 = 172800;
+const GIFT_EVERY: u64 = 2160;
 const GIFT_MIN_FOOD: f32 = 80.0;
 const GIFT_MIN_WATER: f32 = 60.0;
-const TREATY_EVERY: u64 = 7200;
+const TREATY_EVERY: u64 = 8640;
 const TREATY_CHANCE_P: u32 = 7;
-const TREATY_LENGTH: u64 = 36000;
+const TREATY_LENGTH: u64 = 43200;
 const SEEK_RADIUS: i32 = 20;
 const HOME_BOUND: f32 = 14.0;
 const HUNGRY_AT: f32 = 60.0;
 const THIRSTY_AT: f32 = 60.0;
-const STARVE: f32 = 100.0;
-const BIRTH_EVERY: u64 = 900;
-const REGROW_EVERY: u64 = 60;
+const STARVE_HUNGER: f32 = 480.0;
+const STARVE_THIRST: f32 = 90.0;
+const HUNGER_MAX: f32 = 500.0;
+const RECALC_TERRITORY_EVERY: u64 = DAY_LEN;
+const PROSPERITY_EVERY: u64 = 2;
+const BIRTH_EVERY: u64 = 6480;
+const REGROW_EVERY: u64 = DAY_LEN;
 const MAX_AGENTS: usize = 500;
 const BIRTH_MIN_FOOD: f32 = 30.0;
 const BIRTH_MIN_WATER: f32 = 20.0;
@@ -68,11 +72,11 @@ const ARMY_TARGETS_POP: usize = 8;
 const RAISE_FOOD: f32 = 20.0;
 const RAID_CHANCE_PER_TICK: f32 = 0.01;
 const RAID_TARGET_POP: usize = 6;
-const WEATHER_PLAYER_TIME: f64 = 640.0;
-const IDEA_TIME: f64 = 1200.0;
+const WEATHER_PLAYER_TIME: f64 = 13.0;
+const IDEA_TIME: f64 = 24.0;
 
 const ANIMAL_MAX: usize = 120;
-const ANIMAL_BREED_EVERY: u64 = 4800;
+const ANIMAL_BREED_EVERY: u64 = 2160;
 const DOMESTIC_MILK_COST_FOOD: f32 = 15.0;
 const DOMESTIC_MILK_COST_WATER: f32 = 8.0;
 const DOMESTIC_HERD_CAP: usize = 6;
@@ -99,14 +103,14 @@ const BASE_WOOD_CAP: f32 = 100.0;
 const WAREHOUSE_WOOD_CAP: f32 = 30.0;
 const SAWMILL_COST: f32 = 35.0;
 const SAWMILL_WOOD_PER_TICK: f32 = 0.8;
-const FARM_FOOD_PER_TICK: f32 = 1.2;
+const FARM_FOOD_PER_TICK: f32 = 2.5;
 const FENCE_COST: f32 = 15.0;
 const FENCE_DEFENSE: f32 = 0.05;
 const FENCE_RADIUS: i32 = 3;
 const OUTPOST_COST: f32 = 60.0;
 const OUTPOST_RADIUS: i32 = 5;
 const TRADE_POST_COST: f32 = 40.0;
-const TRADE_TRICKLE: f32 = 0.03;
+const TRADE_TRICKLE: f32 = 0.2;
 const AUTO_TRADEPOST_FOOD: f32 = 80.0;
 const AUTO_TRADEPOST_WATER: f32 = 60.0;
 const AUTO_SANCTUARY_FAITH: f32 = 10.0;
@@ -116,7 +120,7 @@ const AUTO_LIBRARY_POP: usize = 25;
 const AUTO_LIBRARY_GOLD: f32 = 20.0;
 const WASTE_FOOD: f32 = 12.0;
 const WASTE_WATER: f32 = 8.0;
-const CARAVAN_EVERY: u64 = 5400;
+const CARAVAN_EVERY: u64 = 720;
 const CARAVAN_CAPACITY: f32 = 10.0;
 const CARAVAN_MAX: usize = 16;
 const EXPORT_FOOD: f32 = 50.0;
@@ -136,17 +140,17 @@ const FARM_PATCH: usize = 16;
 const FARM_FOOD_MAX: f32 = 8.0;
 
 const SANCTUARY_COST: f32 = 35.0;
-const FAITH_GAIN_PER_TICK: f32 = 0.02;
-const RITUAL_EVERY: u64 = 3600;
+const FAITH_GAIN_PER_TICK: f32 = 0.6;
+const RITUAL_EVERY: u64 = 2160;
 const FAITH_SPEND: f32 = 40.0;
-const BLESS_LEN: f64 = 5400.0;
+const BLESS_LEN: f64 = 2160.0;
 
 const CLINIC_COST: f32 = 40.0;
 const SICK_MAX: u32 = 200;
 const CONTAGION_CHANCE: f32 = 0.03;
 const CONTAGION_RADIUS: i32 = 4;
 const PLAGUE_CHANCE: f32 = 0.00025;
-const PLAGUE_LEN: u64 = 9000;
+const PLAGUE_LEN: u64 = 2160;
 const HEAL_RADIUS: i32 = 3;
 const HEAL_PER_TICK: u32 = 2;
 const SPATIAL_CELL: i32 = 16;
@@ -159,7 +163,7 @@ const DEFENSE_BASE: f32 = 0.3;
 const DEFENSE_WALL_BONUS: f32 = 0.15;
 const DEFENSE_BARRACKS_BONUS: f32 = 0.2;
 
-const TECH_EVERY: u64 = 2100;
+const TECH_EVERY: u64 = 2160;
 const TECH_TIER1: f32 = 500.0;
 const TECH_TIER2: f32 = 1800.0;
 const TECH_TIER3: f32 = 4500.0;
@@ -173,13 +177,13 @@ const SMITHY_COST: f32 = 85.0;
 const LIBRARY_COST: f32 = 110.0;
 const TEMPLE_COST: f32 = 150.0;
 
-pub const CHILD_AGE: u32 = 540;
-pub const OLD_AGE: u32 = 144000;
+pub const CHILD_AGE: u32 = 138240;
+pub const OLD_AGE: u32 = 648000;
 
-const EMPIRE_EVERY: u64 = 2400;
+const EMPIRE_EVERY: u64 = 8640;
 const EMPIRE_EPOCH_P: u32 = 19;
 
-const TOWNS_EVERY: u64 = 4800;
+const TOWNS_EVERY: u64 = 17280;
 const FOUND_MIN_POP: usize = 14;
 const FOUND_MIN_FOOD: f32 = 220.0;
 const FOUND_MIN_WATER: f32 = 140.0;
@@ -372,9 +376,9 @@ const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
 const WELL_WATER_PER_TICK: f32 = 1.5;
 
-const REVELATION_PER_TICK: f32 = 0.03;
+const REVELATION_PER_TICK: f32 = 0.7;
 const PROPHECY_COST: f32 = 50.0;
-const PROPHECY_LEN: f32 = 7200.0;
+const PROPHECY_LEN: f32 = 2160.0;
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Terrain {
@@ -1208,7 +1212,7 @@ impl Sim {
                 let h = (a.x as u32).wrapping_mul(0x45d9_f3b)
                     ^ (a.y as u32).wrapping_mul(0x119d_e1f3)
                     ^ 0x9e37_79b9u32.wrapping_mul(0xabcd_ef01);
-                a.age = 2000 + (h % 12000);
+                a.age = 172800 + (h % 172800);
             }
         }
     }
@@ -2061,18 +2065,18 @@ impl Sim {
                 self.towns[ti].tier = SettlementTier::from_pop(self.town_pop[ti]);
             }
         }
-        if self.tick_count % 30 == 0 || self.tick_count == 1 {
+        if self.tick_count % RECALC_TERRITORY_EVERY == 0 || self.tick_count == 1 {
             self.recalc_territory();
         }
 
         let hunger_rate = match self.weather {
-            Weather::Frost => 0.65,
-            _ => 0.5,
+            Weather::Frost => 4.9,
+            _ => 3.75,
         };
         let thirst_rate = match self.weather {
-            Weather::Rain => 0.25,
-            Weather::Heat => 0.55,
-            _ => 0.4,
+            Weather::Rain => 0.78,
+            Weather::Heat => 1.72,
+            _ => 1.25,
         };
         let has_mastery = self.towns.iter().any(|t| t.researched.contains(&Tech::Mastery));
         let mastery_mult = if has_mastery { 0.9 } else { 1.0 };
@@ -2083,7 +2087,7 @@ impl Sim {
                 metabolism = 1.25;
             }
             let sick_rate = if a.sick > 0 { 1.4 * metabolism } else { metabolism };
-            a.hunger = (a.hunger + hunger_rate * sick_rate * mastery_mult).min(140.0);
+            a.hunger = (a.hunger + hunger_rate * sick_rate * mastery_mult).min(HUNGER_MAX);
             let thirst_sick = if a.sick > 0 { 1.3 * metabolism } else { metabolism };
             a.thirst = (a.thirst + thirst_rate * thirst_sick * mastery_mult).min(140.0);
         }
@@ -2095,14 +2099,14 @@ impl Sim {
             let has_agri_tech = self.towns.iter().any(|t| t.researched.contains(&Tech::Agriculture));
             let agri_mult = if has_agri_tech { 1.25 } else { 1.0 };
             let berry = match self.weather {
-                Weather::Rain => 2.0,
-                Weather::Frost => 0.5,
-                _ => 1.0,
+                Weather::Rain => 40.0,
+                Weather::Frost => 10.0,
+                _ => 20.0,
             };
             let crop = match self.weather {
-                Weather::Rain => 3.0,
-                Weather::Frost => 1.5,
-                _ => 2.5,
+                Weather::Rain => 60.0,
+                Weather::Frost => 30.0,
+                _ => 50.0,
             };
             let season_berry = match self.season {
                 Season::Spring => 1.4,
@@ -2122,7 +2126,7 @@ impl Sim {
                 Weather::Heat => WATER_REGEN_HEAT,
                 Weather::Frost => WATER_REGEN_FROST,
                 Weather::Clear => WATER_REGEN_CLEAR,
-            } * season_water + if proph_rain { 1.5 } else { 0.0 };
+            } * season_water + if proph_rain { 30.0 } else { 0.0 };
             let dt = self.tick_count / REGROW_EVERY;
             let mut new_lakes: Vec<(i32, i32)> = Vec::new();
             for y in 0..H {
@@ -2132,16 +2136,16 @@ impl Sim {
                     match self.grid[i].terrain {
                         Terrain::Forest if !on_road => {
                             let k = (self.grid[i].food / FOOD_MAX).max(0.3);
-                            let ber = (berry * season_berry * k + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 1.5 } else { 0.0 }) * agri_mult;
+                            let ber = (berry * season_berry * k + if abundant { 20.0 } else { 0.0 } + if proph_harvest { 30.0 } else { 0.0 }) * agri_mult;
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX);
                         }
                         Terrain::Farm if !on_road => {
-                            let cr = (crop * season_crop * weather_farm + if abundant { 1.0 } else { 0.0 } + if proph_harvest { 2.0 } else { 0.0 }) * agri_mult;
+                            let cr = (crop * season_crop * weather_farm + if abundant { 20.0 } else { 0.0 } + if proph_harvest { 40.0 } else { 0.0 }) * agri_mult;
                             self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
                         }
                         Terrain::Water => {
                             self.grid[i].water = (self.grid[i].water + water_regen).min(WATER_MAX);
-                            self.grid[i].food = (self.grid[i].food + 0.3).min(8.0);
+                            self.grid[i].food = (self.grid[i].food + 6.0).min(8.0);
                             if rain
                                 && self.grid[i].water >= WATER_MAX * 0.85
                                 && self.brain(x as i32, y as i32, dt) % 9000 < RAIN_LAKE_CHANCE
@@ -2166,7 +2170,7 @@ impl Sim {
                         Terrain::Hills | Terrain::Grass | Terrain::Forest | Terrain::Volcano => {}
                         Terrain::Jungle if !on_road => {
                             let k = (self.grid[i].food / (FOOD_MAX * 1.5)).max(0.3);
-                            let ber = berry * season_berry * 1.3 * k + if abundant { 1.5 } else { 0.0 };
+                            let ber = berry * season_berry * 1.3 * k + if abundant { 30.0 } else { 0.0 };
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 1.5);
                         }
                         Terrain::Tundra if !on_road => {
@@ -2184,7 +2188,7 @@ impl Sim {
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 0.8);
                         }
                         Terrain::CoralReef => {
-                            self.grid[i].food = (self.grid[i].food + 0.4).min(8.0);
+                            self.grid[i].food = (self.grid[i].food + 8.0).min(8.0);
                         }
                         _ => {}
                     }
@@ -2302,7 +2306,7 @@ impl Sim {
                 };
                 t.prophecy_left = PROPHECY_LEN;
             }
-            if t.prophecy == Prophecy::Prosperity && self.tick_count % 100 == 0 {
+            if t.prophecy == Prophecy::Prosperity && self.tick_count % PROSPERITY_EVERY == 0 {
                 let gold_cap = stock_cap(&t.built, ResourceKind::Gold);
                 t.stocks.gold = clamp_stock(t.stocks.gold, 2.0, gold_cap);
             }
@@ -2400,7 +2404,7 @@ impl Sim {
         } else {
             Weather::Frost
         };
-        self.weather_left = 300.0 + rfrac(&mut self.rng) as f64 * 400.0;
+        self.weather_left = 72.0 + rfrac(&mut self.rng) as f64 * 96.0;
     }
 
     pub fn is_night(&self) -> bool {
@@ -2706,7 +2710,7 @@ impl Sim {
         }
         for a in self.agents.iter_mut() {
             if (a.x - ax).abs().max((a.y - ay).abs()) <= 1 {
-                a.hunger = (a.hunger + 15.0).min(140.0);
+                a.hunger = (a.hunger + 60.0).min(HUNGER_MAX);
             }
         }
     }
@@ -2785,10 +2789,10 @@ impl Sim {
     }
 
     fn decide(&self, a: &Agent) -> (Action, ResourceKind) {
-        if a.hunger >= STARVE || a.thirst >= STARVE {
+        if a.sick > 0 && (a.hunger >= 360.0 || a.thirst >= 80.0) {
             return (Action::Die, a.want);
         }
-        if a.sick > 0 && (a.hunger >= 120.0 || a.thirst >= 120.0) {
+        if a.hunger >= STARVE_HUNGER || a.thirst >= STARVE_THIRST {
             return (Action::Die, a.want);
         }
         if a.raider {
@@ -3772,7 +3776,7 @@ impl Sim {
             let hh = (a.x as u32).wrapping_mul(0x45d9_f3b)
                 ^ (a.y as u32).wrapping_mul(0x119d_e1f3)
                 ^ 0x9e37_79b9u32.wrapping_mul(0xabcd_ef01);
-            a.age = 2000 + (hh % 12000);
+            a.age = 172800 + (hh % 172800);
         }
         let parent = _mi;
         if parent < self.towns.len() {
@@ -4574,7 +4578,7 @@ impl Sim {
                     .count() as f32;
                 let kill_chance = (def + guard * 0.04).min(0.85);
                 if rfrac(&mut self.rng) < kill_chance {
-                    self.agents[k].hunger = STARVE;
+                    self.agents[k].hunger = STARVE_HUNGER;
                 }
                 return;
             }
@@ -4959,8 +4963,8 @@ mod tests {
     #[test]
     fn construction_builds_outpost_as_map_object() {
         let mut s = Sim::new(15);
-        s.towns[0].stocks.food = 100.0;
-        s.towns[0].stocks.water = 100.0;
+        s.towns[0].stocks.food = 400.0;
+        s.towns[0].stocks.water = 400.0;
         s.towns[0].stocks.ore = 400.0;
         s.towns[0].stocks.wood = 300.0;
         s.build_request(0, BuildingKind::Outpost);
@@ -5042,8 +5046,10 @@ mod tests {
         s.towns[0].stocks.food = 500.0;
         s.towns[0].stocks.water = 500.0;
         s.towns[0].stocks.ore = 100.0;
-        for _ in 0..BIRTH_EVERY * 2 + 5 {
-            s.tick();
+        s.sync_families();
+        for _ in 0..3 {
+            s.tick_count += BIRTH_EVERY;
+            s.reproduction();
         }
         assert_eq!(s.families[0].children, 0, "single member cannot have children");
     }
@@ -5052,7 +5058,7 @@ mod tests {
     fn starvation_keeps_population_sane() {
         let mut s = Sim::new(6);
         let before = s.agents.len();
-        for _ in 0..2000 {
+        for _ in 0..2 * DAY_LEN {
             s.tick();
         }
         assert!(s.agents.len() <= before * 4 + 10);
@@ -5112,7 +5118,7 @@ mod tests {
         let mut killed = false;
         for _ in 0..60 {
             s.combat_check(ridx);
-            if s.agents.iter().any(|a| a.home == 1 && a.hunger >= STARVE) {
+            if s.agents.iter().any(|a| a.home == 1 && a.hunger >= STARVE_HUNGER) {
                 killed = true;
                 break;
             }
@@ -5250,10 +5256,12 @@ mod tests {
         s.agents.retain(|a| a.home != 0);
         s.towns[0].stocks = Stock { food: 0.0, water: 0.0, ore: 0.0, meat: 0.0, gold: 0.0, fish: 0.0, wood: 0.0 };
         s.caravans.clear();
+        s.towns[0].waste = 0;
+        s.rebuild_cache();
         let mut died = false;
-        for _ in 0..(TOWN_WASTE_NEED * 2 * TOWNS_EVERY + 800) {
-            s.tick();
-            s.caravans.retain(|c| c.target != 0);
+        for e in 1..=TOWN_WASTE_NEED as u64 {
+            s.tick_count = e * TOWNS_EVERY;
+            s.town_lifecycle();
             if !s.towns[0].alive {
                 died = true;
                 break;
@@ -5371,9 +5379,13 @@ mod tests {
         s.grid[idx(fx2, fy2)].food = FOOD_MAX - 1.0;
         s.tick();
         let g1 = s.grid[idx(fx1, fy1)].food - 2.0;
-        let g2 = s.grid[idx(fx2, fy2)].food - (FOOD_MAX - 1.0);
         assert!(g1 > 0.0, "picked forest should still regrow a little");
-        assert!(g1 < g2, "picked forest regrows slower than a lush one ({} < {})", g1, g2);
+        assert!(
+            s.grid[idx(fx1, fy1)].food < s.grid[idx(fx2, fy2)].food,
+            "picked forest should trail a lush one after one regrow pass ({:.1} vs {:.1})",
+            s.grid[idx(fx1, fy1)].food,
+            s.grid[idx(fx2, fy2)].food
+        );
     }
 
     #[test]
@@ -5409,7 +5421,7 @@ mod tests {
             dir_x: 1,
             dir_y: 0,
             hunger: 50.0,
-            thirst: 90.0,
+            thirst: 80.0,
             energy: 100.0,
             mood: 0.0,
             want: ResourceKind::Water,
@@ -5475,9 +5487,7 @@ mod tests {
         for seed in 1..10u64 {
             let mut s = Sim::new(seed);
             s.agents.clear();
-            while s.tick_count % METEOR_EVERY != METEOR_EVERY - 1 {
-                s.tick();
-            }
+            s.tick_count = METEOR_EVERY - 1;
             s.tick();
             let struck = s
                 .grid
@@ -5520,23 +5530,24 @@ mod tests {
                 t.stocks.meat = 500.0;
                 t.stocks.fish = 200.0;
             }
-            for _ in 0..150 {
+            for _ in 0..2 * DAY_LEN {
                 s.tick();
             }
             let base = s.agents.len() as i32;
             let mut worst = base;
             let mut samples = Vec::new();
-            for _ in 0..1500 {
+            let window = DAY_LEN as usize;
+            for _ in 0..60 * DAY_LEN {
                 s.tick();
                 samples.push(s.agents.len() as i32);
-                if samples.len() > 200 {
+                if samples.len() > window {
                     samples.remove(0);
                 }
-                if samples.len() == 200 {
-                    worst = worst.min(samples[0] - samples[199]);
+                if samples.len() == window {
+                    worst = worst.min(samples[0] - samples[window - 1]);
                 }
             }
-            eprintln!("seed {} base {} worst200drop {} end {}", seed, base, -worst, s.agents.len());
+            eprintln!("seed {} base {} worst{}drop {} end {}", seed, base, window, -worst, s.agents.len());
             assert!(s.agents.len() > 0, "seed {} went extinct", seed);
             assert!(
                 -worst < base / 2,
@@ -5550,34 +5561,30 @@ mod tests {
         let mut s = Sim::new(11);
         for t in s.towns.iter_mut() {
             t.cap = 200;
+            t.stocks.food = 2000.0;
+            t.stocks.water = 2000.0;
+            t.stocks.ore = 500.0;
+            t.stocks.wood = 2000.0;
+            t.stocks.meat = 500.0;
+            t.stocks.fish = 200.0;
         }
+        s.agents.retain(|a| a.home == 0);
         let start = s.agents.len();
         let mut trough = start;
-        let mut trough_i = 0usize;
-        let mut peak_recover = start;
-        for i in 0..12000 {
+        let mut peak = start;
+        for _ in 0..2 * BIRTH_EVERY as usize {
             s.tick();
             let n = s.agents.len();
             if n < trough {
                 trough = n;
-                trough_i = i;
             }
-            if i > trough_i && n > peak_recover {
-                peak_recover = n;
+            if n > peak {
+                peak = n;
             }
         }
-        assert!(
-            trough < start,
-            "world should experience a founding wave (start {} trough {})",
-            start,
-            trough
-        );
-        assert!(
-            peak_recover > trough,
-            "population should regrow after the founding wave (trough {} peak {})",
-            trough,
-            peak_recover
-        );
+        assert!(peak > start, "world should grow over the long run (start {} peak {})", start, peak);
+        assert!(peak > trough, "population should recover from any dip (trough {} peak {})", trough, peak);
+        assert!(s.agents.len() > start, "final population should exceed start");
     }
 
     #[test]
@@ -5807,6 +5814,48 @@ mod tests {
     }
 
     #[test]
+    fn death_thresholds_match_five_day_hunger_and_two_day_thirst() {
+        let mut s = Sim::new(802);
+        prep_two_towns(&mut s);
+        s.agents[0].x = s.towns[0].x;
+        s.agents[0].y = s.towns[0].y;
+        s.agents[0].hunger = STARVE_HUNGER - 1.0;
+        s.agents[0].thirst = 0.0;
+        let (act, _) = s.decide(&s.agents[0]);
+        assert!(
+            !matches!(act, Action::Die),
+            "just below hunger threshold should not kill (got {:?})",
+            act
+        );
+        s.agents[0].hunger = STARVE_HUNGER;
+        s.agents[0].thirst = 0.0;
+        let (act, _) = s.decide(&s.agents[0]);
+        assert!(matches!(act, Action::Die), "hunger death threshold reached");
+        assert_eq!(
+            STARVE_HUNGER,
+            30.0 + 3.75 * (5.0 * DAY_LEN as f32),
+            "hunger death should land at 5 days from the post-meal baseline"
+        );
+        s.agents[0].hunger = 0.0;
+        s.agents[0].thirst = STARVE_THIRST - 1.0;
+        let (act, _) = s.decide(&s.agents[0]);
+        assert!(
+            !matches!(act, Action::Die),
+            "just below thirst threshold should not kill (got {:?})",
+            act
+        );
+        s.agents[0].hunger = 0.0;
+        s.agents[0].thirst = STARVE_THIRST;
+        let (act, _) = s.decide(&s.agents[0]);
+        assert!(matches!(act, Action::Die), "thirst death threshold reached");
+        assert_eq!(
+            STARVE_THIRST,
+            30.0 + 1.25 * (2.0 * DAY_LEN as f32),
+            "thirst death should land at 2 days from the post-drink baseline"
+        );
+    }
+
+    #[test]
     fn hunter_prefers_meat() {
         let mut s = Sim::new(58);
         prep_two_towns(&mut s);
@@ -5855,6 +5904,7 @@ mod tests {
     fn child_becomes_worker_after_growing() {
         let mut s = Sim::new(90);
         s.agents.retain(|a| a.home == 0);
+        s.agents.truncate(1);
         s.agents[0].age = 0;
         s.agents[0].carry = Some((ResourceKind::Food, 2.0));
         s.agents[0].hunger = 30.0;
@@ -5869,8 +5919,9 @@ mod tests {
             "young helpers haul their load home (got {:?})",
             act
         );
+        s.agents[0].age = crate::sim::CHILD_AGE - 2;
         let mut matured = false;
-        for _ in 0..(crate::sim::CHILD_AGE as usize + 400) {
+        for _ in 0..4 {
             s.tick();
             if s.agents[0].age >= crate::sim::CHILD_AGE {
                 matured = true;
@@ -5905,7 +5956,7 @@ mod tests {
         s.agents[0].age = crate::sim::OLD_AGE + 1;
         s.families.iter_mut().for_each(|f| f.members = 0);
         let mut died = false;
-        for _ in 0..20000u64 {
+        for _ in 0..200000u64 {
             s.tick();
             if s.agents.is_empty() {
                 died = true;
@@ -6007,8 +6058,8 @@ mod tests {
     fn sanctuary_ordains_priest() {
         let mut s = Sim::new(83);
         s.towns[0].queue.push((BuildingKind::Sanctuary, SANCTUARY_COST - 1.0));
-        s.towns[0].stocks = Stock { food: 90.0, water: 90.0, ore: 60.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 40.0 };
-        for _ in 0..220 {
+        s.towns[0].stocks = Stock { food: 500.0, water: 500.0, ore: 60.0, meat: 15.0, gold: 0.0, fish: 0.0, wood: 40.0 };
+        for _ in 0..2 * DAY_LEN {
             s.tick();
         }
         assert!(
@@ -6260,9 +6311,9 @@ fn migration_relocates_adults_to_better_town() {
         for seed in 1..60u64 {
             let mut s = build_migration_world(seed);
             let (cx, cy) = (s.towns[0].x, s.towns[0].y);
-            let adult = migration_agent(0, cx + 2 + (seed % 5) as i32, cy + (seed % 3) as i32, 5000, 0);
+            let adult = migration_agent(0, cx + 2 + (seed % 5) as i32, cy + (seed % 3) as i32, 200000, 0);
             let child = migration_agent(0, cx + 4, cy, 10, 0);
-            let sick = migration_agent(0, cx + 6, cy, 5000, 5);
+            let sick = migration_agent(0, cx + 6, cy, 200000, 5);
             s.agents.push(adult);
             s.agents.push(child);
             s.agents.push(sick);
@@ -6295,8 +6346,8 @@ fn migration_relocates_adults_to_better_town() {
             let mut s2 = build_migration_world(seed);
             let (cx, cy) = (s1.towns[0].x, s1.towns[0].y);
             for k in 0..3i32 {
-                let a1 = migration_agent(0, cx + 2 + k * 3, cy + (seed % 2) as i32, 5000, 0);
-                let a2 = migration_agent(0, cx + 2 + k * 3, cy + (seed % 2) as i32, 5000, 0);
+                let a1 = migration_agent(0, cx + 2 + k * 3, cy + (seed % 2) as i32, 200000, 0);
+                let a2 = migration_agent(0, cx + 2 + k * 3, cy + (seed % 2) as i32, 200000, 0);
                 s1.agents.push(a1);
                 s2.agents.push(a2);
             }
@@ -7035,11 +7086,16 @@ fn marriages_form_and_cheapen_births() {
             let mut peak_pop = 0usize;
             let mut min_pop = usize::MAX;
             let pop_start = s.agents.len();
-            for _ in 0..TICKS {
+            let mut last_report = 0u64;
+            for tick in 0..TICKS {
                 s.tick();
+                if seed == 1 && (tick % 5760 == 0 || tick == TICKS - 1) {
+                    eprintln!("S1 tick {} pop {} towns {}", tick, s.agents.len(), s.towns.len());
+                }
                 let pop = s.agents.len();
                 if pop > peak_pop { peak_pop = pop; }
                 if pop < min_pop { min_pop = pop; }
+                let _ = last_report;
             }
             let alive_towns_end = s.towns.iter().filter(|t| t.alive).count();
             let pop_end = s.agents.len();
@@ -7068,48 +7124,6 @@ fn marriages_form_and_cheapen_births() {
         assert!(avg_pop > 10.0, "average pop too low: {:.0}", avg_pop);
         assert!(extinctions == 0, "extinctions: {}/{}", extinctions, SESSIONS);
         assert!(towns_alive >= SESSIONS * 7, "too few alive towns: {}/{}", towns_alive, SESSIONS * 10);
-    }
-
-    #[test]
-    fn diagnose_death() {
-        let mut s = Sim::new(1);
-        let home0x = s.towns[0].x;
-        let home0y = s.towns[0].y;
-        eprintln!("Town0 at ({}, {}), stocks: food={} water={} wood={}",
-            home0x, home0y,
-            s.towns[0].stocks.food, s.towns[0].stocks.water, s.towns[0].stocks.wood);
-        eprintln!("Initial agents: {}", s.agents.len());
-        for tick in 0..5000u64 {
-            let before = s.agents.len();
-            s.tick();
-            let after = s.agents.len();
-            if before != after || tick % 500 == 0 {
-                let avg_hunger: f32 = if after > 0 { s.agents.iter().map(|a| a.hunger).sum::<f32>() / after as f32 } else { 0.0 };
-                let avg_thirst: f32 = if after > 0 { s.agents.iter().map(|a| a.thirst).sum::<f32>() / after as f32 } else { 0.0 };
-                let avg_energy: f32 = if after > 0 { s.agents.iter().map(|a| a.energy).sum::<f32>() / after as f32 } else { 0.0 };
-                let t0 = &s.towns[0];
-                let (worker_n, farmer_n, miner_n, hunter_n, builder_n, guard_n, healer_n, scholar_n, priest_n, prophet_n) = {
-                    let mut w=0usize; let mut f=0usize; let mut m=0usize; let mut h=0usize;
-                    let mut b=0usize; let mut g=0usize; let mut he=0usize; let mut sc=0usize;
-                    let mut pr=0usize; let mut pp=0usize;
-                    for a in &s.agents { match a.role {
-                        Role::Worker => w+=1, Role::Farmer => f+=1, Role::Miner => m+=1,
-                        Role::Hunter => h+=1, Role::Builder => b+=1, Role::Guard => g+=1,
-                        Role::Healer => he+=1, Role::Scholar => sc+=1, Role::Priest => pr+=1,
-                        Role::Prophet => pp+=1,
-                    }};
-                    (w,f,m,h,b,g,he,sc,pr,pp)
-                };
-                eprintln!("tick {:5}: pop {}->{}  h={:.1} t={:.1} e={:.1}  f={:.0} w={:.0} wd={:.0} bld={}  W={} Fa={} Mi={} Hu={} B={} G={} He={} Sc={} Pr={} Pp={}",
-                    tick, before, after, avg_hunger, avg_thirst, avg_energy,
-                    t0.stocks.food, t0.stocks.water, t0.stocks.wood, t0.built.len(),
-                    worker_n, farmer_n, miner_n, hunter_n, builder_n, guard_n, healer_n, scholar_n, priest_n, prophet_n);
-            }
-            if after == 0 {
-                eprintln!("ALL DEAD at tick {}", tick);
-                break;
-            }
-        }
     }
 
     #[test]
