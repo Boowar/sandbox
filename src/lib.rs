@@ -97,6 +97,7 @@ impl App {
                             sim::Terrain::Tundra => { sim.grid[i].food = 4.0; sim.grid[i].ore = 0.0; sim.grid[i].wood = 0.0; }
                             sim::Terrain::Jungle => { sim.grid[i].food = 0.0; sim.grid[i].ore = 0.0; sim.grid[i].wood = 15.0; }
                             sim::Terrain::Grass => { sim.grid[i].food = 10.0; sim.grid[i].ore = 0.0; sim.grid[i].wood = 0.0; }
+                            sim::Terrain::Sapling => { sim.grid[i].food = 0.0; sim.grid[i].ore = 0.0; sim.grid[i].wood = 0.0; }
                             sim::Terrain::Farm => {}
                             sim::Terrain::Swamp => { sim.grid[i].food = 8.0; sim.grid[i].ore = 0.0; sim.grid[i].wood = 0.0; }
                             sim::Terrain::Berries => { sim.grid[i].food = 10.0; sim.grid[i].ore = 0.0; sim.grid[i].wood = 0.0; }
@@ -255,6 +256,7 @@ impl App {
             sim::Terrain::Farm => sim::Terrain::Forest,
             sim::Terrain::Volcano => sim::Terrain::Grass,
             sim::Terrain::CoralReef => sim::Terrain::Water,
+            sim::Terrain::Sapling => sim::Terrain::Forest,
         };
         self.sync_ui();
     }

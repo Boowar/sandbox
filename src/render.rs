@@ -117,6 +117,17 @@ fn paint_grass(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     }
 }
 
+fn paint_sapling(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 108, 150, 74);
+    let h = hash2(x, y);
+    fill(buf, ax, ay + 1, ART, 1, 96, 134, 64);
+    fill(buf, ax + 1 + (h % 2) as usize, ay + 3, 2, 1, 60, 96, 52);
+    fill(buf, ax + 1 + ((h >> 3) % 2) as usize, ay + 1, 2, 2, 84, 132, 66);
+    if (h >> 5) % 3 == 0 {
+        set_px(buf, ax + ((h >> 7) % 4) as usize, ay + ((h >> 9) % 3) as usize, 130, 178, 92);
+    }
+}
+
 fn paint_forest(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     fill(buf, ax, ay, ART, ART, 42, 92, 32);
     let h = hash2(x, y);
@@ -255,6 +266,7 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
                 Terrain::Water => paint_water(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Grass => paint_grass(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Forest => paint_forest(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Sapling => paint_sapling(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Hills => paint_hills(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Farm => paint_farm(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Desert => paint_desert(&mut buf, ax, ay, x as i32, y as i32),
@@ -276,6 +288,9 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
                 fill(&mut buf, ax, ay, ART, ART, 92, 42, 18);
                 set_px(&mut buf, ax + (h % 3) as usize, ay + ((h >> 3) % 3) as usize, 255, 128, 16);
                 set_px(&mut buf, ax + ((h >> 5) % 4) as usize, ay + ((h >> 7) % 4) as usize, 255, 200, 40);
+            } else if c.terrain == Terrain::Farm && crate::sim::irrigated_view(sim, x as i32, y as i32) {
+                fill(&mut buf, ax, ay, ART, 1, 96, 138, 176);
+                fill(&mut buf, ax, ay + ART - 1, ART, 1, 96, 138, 176);
             } else if c.gold > 0.0 {
                 set_px(&mut buf, ax + 1 + (h % 2) as usize, ay + 1 + ((h >> 3) % 2) as usize, 240, 210, 90);
                 set_px(&mut buf, ax + 2 + ((h >> 5) % 2) as usize, ay + 2 + ((h >> 7) % 2) as usize, 255, 232, 130);

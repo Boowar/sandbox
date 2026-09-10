@@ -56,6 +56,8 @@ const PROSPERITY_EVERY: u64 = 2;
 const COUPLE_BIRTH_EVERY: u64 = MARRIAGE_EVERY;
 const REGROW_EVERY: u64 = DAY_LEN;
 const FOREST_REGROW_EVERY: u64 = SEASON_LEN * 4 * 10;
+const SPREAD_TREES: usize = 24;
+const IRRIGATION_BONUS: f32 = 0.4;
 const HEAT_WOOD_PER_DAY: f32 = 1.0;
 const COLD_HUNGER_BONUS: f32 = 0.8;
 const FISH_REGEN_RAIN_BONUS: f32 = 8.0;
@@ -423,6 +425,7 @@ const PROPHECY_LEN: f32 = 2160.0;
 pub enum Terrain {
     Grass,
     Forest,
+    Sapling,
     Hills,
     Water,
     Farm,
@@ -439,6 +442,42 @@ impl Terrain {
 fn walkable(self) -> bool {
     !matches!(self, Terrain::Water | Terrain::CoralReef | Terrain::Volcano)
 }
+}
+
+fn is_irrigated(s: &Sim, x: i32, y: i32) -> bool {
+    for dy in -1..=1i32 {
+        for dx in -1..=1i32 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let nx = x + dx;
+            let ny = y + dy;
+            if !in_bounds(nx, ny) {
+                continue;
+            }
+            let nc = &s.grid[idx(nx, ny)];
+            if nc.terrain == Terrain::Water && nc.water > 0.0 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn irrigated_view(s: &Sim, x: i32, y: i32) -> bool {
+    is_irrigated(s, x, y)
+}
+
+fn in_town_zone(s: &Sim, x: i32, y: i32) -> bool {
+    for t in s.towns.iter() {
+        if t.alive {
+            let r = t.tier.max_radius() + 3;
+            if (x - t.x).abs() <= r && (y - t.y).abs() <= r {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn is_food_source(c: &Cell) -> bool {
@@ -982,7 +1021,7 @@ impl Sim {
                                 Terrain::Tundra => tundra += 1,
                                 Terrain::Swamp => swamp += 1,
                                 Terrain::Volcano => volcano += 1,
-                                Terrain::Farm | Terrain::Grass | Terrain::CoralReef | Terrain::Berries => {}
+                                Terrain::Farm | Terrain::Grass | Terrain::CoralReef | Terrain::Berries | Terrain::Sapling => {}
                             }
                         }
                     }
@@ -1021,7 +1060,7 @@ impl Sim {
                             if volcano >= 1 { Terrain::Volcano } else { dominant }
                         }
                         Terrain::CoralReef => Terrain::CoralReef,
-                        Terrain::Farm | Terrain::Berries => Terrain::Grass,
+                        Terrain::Farm | Terrain::Berries | Terrain::Sapling => Terrain::Grass,
                         Terrain::Grass => dominant,
                     };
                     if next[i].terrain == Terrain::Hills && next[i].ore <= 0.0 {
@@ -1744,6 +1783,7 @@ impl Sim {
                     }
                     Terrain::Forest => c.wood = WOOD_MAX,
                     Terrain::Jungle => c.wood = WOOD_MAX * 1.5,
+                    Terrain::Sapling => c.wood = 0.0,
                     Terrain::Tundra => c.food = (c.food + FOOD_MAX * 0.5).min(FOOD_MAX * 0.4),
                     Terrain::Farm | Terrain::Hills | Terrain::Water | Terrain::Desert | Terrain::Swamp | Terrain::Berries | Terrain::Volcano | Terrain::CoralReef => {}
                 }
@@ -2246,8 +2286,10 @@ impl Sim {
                     let on_road = self.roads[i];
                     match self.grid[i].terrain {
                         Terrain::Farm if !on_road => {
+                            let irrig = is_irrigated(self, x as i32, y as i32);
+                            let cap = if irrig { FARM_FOOD_MAX * (1.0 + IRRIGATION_BONUS) } else { FARM_FOOD_MAX };
                             let cr = (crop * season_crop * weather_farm + if abundant { 20.0 } else { 0.0 } + if proph_harvest { 40.0 } else { 0.0 }) * agri_mult;
-                            self.grid[i].food = (self.grid[i].food + cr).min(FARM_FOOD_MAX);
+                            self.grid[i].food = (self.grid[i].food + cr).min(cap);
                         }
                         Terrain::Water => {
                             self.grid[i].water = (self.grid[i].water + water_regen).min(WATER_MAX);
@@ -2332,8 +2374,67 @@ impl Sim {
                 match c.terrain {
                     Terrain::Forest if !self.roads[i] => c.wood = WOOD_MAX,
                     Terrain::Jungle if !self.roads[i] => c.wood = WOOD_MAX * 1.5,
+                    Terrain::Sapling if !self.roads[i] => {
+                        c.terrain = Terrain::Forest;
+                        c.wood = WOOD_MAX;
+                    }
                     _ => {}
                 }
+            }
+            let epoch = self.tick_count / FOREST_REGROW_EVERY;
+            let mut cands = Vec::new();
+            for y in 0..H {
+                for x in 0..W {
+                    let i = idx(x as i32, y as i32);
+                    let oc = &self.grid[i];
+                    if oc.burn > 0
+                        || oc.wood <= 1.0
+                        || !(oc.terrain == Terrain::Forest || oc.terrain == Terrain::Jungle)
+                    {
+                        continue;
+                    }
+                    let (cx, cy) = (x as i32, y as i32);
+                    for dy in -1..=1i32 {
+                        for dx in -1..=1i32 {
+                            if dx == 0 && dy == 0 {
+                                continue;
+                            }
+                            let nx = cx + dx;
+                            let ny = cy + dy;
+                            if !in_bounds(nx, ny) {
+                                continue;
+                            }
+                            let ni = idx(nx, ny);
+                            let nc = &self.grid[ni];
+                            if self.roads[ni]
+                                || nc.burn > 0
+                                || !(nc.terrain == Terrain::Grass || nc.terrain == Terrain::Tundra)
+                            {
+                                continue;
+                            }
+                            if in_town_zone(self, nx, ny) {
+                                continue;
+                            }
+                            cands.push(ni);
+                        }
+                    }
+                }
+            }
+            cands.sort_by_key(|&ni| {
+                let (nx, ny) = (ni as i32 % W as i32, ni as i32 / W as i32);
+                (self.brain(nx, ny, epoch), ni)
+            });
+            cands.dedup_by_key(|ni| *ni);
+            let mut seeded = 0;
+            for &ni in cands.iter() {
+                if seeded >= SPREAD_TREES {
+                    break;
+                }
+                let c = &mut self.grid[ni];
+                c.terrain = Terrain::Sapling;
+                c.food = 0.0;
+                c.wood = 0.0;
+                seeded += 1;
             }
         }
 
@@ -4092,6 +4193,7 @@ impl Sim {
                         let ni = idx(nx, ny);
                         if self.grid[ni].burn == 0
                             && (self.grid[ni].terrain == Terrain::Forest
+                                || self.grid[ni].terrain == Terrain::Sapling
                                 || self.grid[ni].terrain == Terrain::Farm
                                 || self.grid[ni].terrain == Terrain::Jungle
                                 || self.grid[ni].terrain == Terrain::Swamp
@@ -4108,6 +4210,7 @@ impl Sim {
             let c = &mut self.grid[ni];
             if c.burn == 0
                 && (c.terrain == Terrain::Forest
+                    || c.terrain == Terrain::Sapling
                     || c.terrain == Terrain::Farm
                     || c.terrain == Terrain::Jungle
                     || c.terrain == Terrain::Swamp
@@ -4115,7 +4218,7 @@ impl Sim {
             {
                 c.burn = FIRE_LEN;
                 c.food = c.food.min(2.0);
-                if c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle {
+                if c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle || c.terrain == Terrain::Sapling {
                     c.wood = 0.0;
                 }
                 self.fire_cells.push(ni);
@@ -5226,7 +5329,7 @@ mod tests {
                     Terrain::Forest => forest += 1,
                     Terrain::Water => water += 1,
                     Terrain::Hills => hills += 1,
-                    Terrain::Grass | Terrain::Farm | Terrain::Desert | Terrain::Tundra | Terrain::Jungle | Terrain::Swamp | Terrain::Berries | Terrain::Volcano | Terrain::CoralReef => {}
+                    Terrain::Grass | Terrain::Farm | Terrain::Desert | Terrain::Tundra | Terrain::Sapling | Terrain::Jungle | Terrain::Swamp | Terrain::Berries | Terrain::Volcano | Terrain::CoralReef => {}
                 }
             }
             let n = (W * H) as f64;
@@ -6755,6 +6858,110 @@ mod tests {
             h1 - a1.hunger,
             h2 - a2.hunger
         );
+    }
+
+    #[test]
+    fn forest_spreads_saplings_every_decade_and_matures() {
+        let mut s = Sim::new(9001);
+        s.agents.clear();
+        for t in s.towns.iter_mut() {
+            t.alive = false;
+        }
+        let before = s
+            .grid
+            .iter()
+            .filter(|c| c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle)
+            .count();
+        s.tick_count = FOREST_REGROW_EVERY - 1;
+        s.tick();
+        let sapling_cells: Vec<usize> = s
+            .grid
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.terrain == Terrain::Sapling)
+            .map(|(i, _)| i)
+            .collect();
+        assert!(!sapling_cells.is_empty(), "forest should seed new saplings each decade");
+        s.tick_count = 2 * FOREST_REGROW_EVERY - 1;
+        s.tick();
+        for &i in sapling_cells.iter() {
+            assert_eq!(
+                s.grid[i].terrain,
+                Terrain::Forest,
+                "saplings should mature into forest after a decade"
+            );
+        }
+        let after = s
+            .grid
+            .iter()
+            .filter(|c| c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle)
+            .count();
+        assert!(after > before, "forest should grow via saplings");
+    }
+
+    #[test]
+    fn farm_irrigation_boosts_yield_near_water() {
+        let mut s = Sim::new(777);
+        s.agents.clear();
+        s.weather = Weather::Clear;
+        s.weather_left = 100000.0;
+        s.season = Season::Summer;
+        let mut water_cells: Vec<(i32, i32)> = Vec::new();
+        for y in 0..H {
+            for x in 0..W {
+                if s.grid[idx(x as i32, y as i32)].terrain == Terrain::Water {
+                    water_cells.push((x as i32, y as i32));
+                }
+            }
+        }
+        let mut shore = None;
+        for &(wx, wy) in water_cells.iter() {
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let (nx, ny) = (wx + dx, wy + dy);
+                if in_bounds(nx, ny) && s.grid[idx(nx, ny)].terrain == Terrain::Grass {
+                    shore = Some((nx, ny, wx, wy));
+                    break;
+                }
+            }
+            if shore.is_some() {
+                break;
+            }
+        }
+        let (ax, ay, _wx, _wy) = shore.expect("world must have a lake shore");
+        let mut far = None;
+        for y in 0..H {
+            for x in 0..W {
+                let (cx, cy) = (x as i32, y as i32);
+                if s.grid[idx(cx, cy)].terrain == Terrain::Grass && !is_irrigated(&s, cx, cy) {
+                    far = Some((cx, cy));
+                    break;
+                }
+            }
+            if far.is_some() {
+                break;
+            }
+        }
+        let (bx, by) = far.expect("world must have dry land");
+        let (ai, bi) = (idx(ax, ay), idx(bx, by));
+        s.grid[ai].terrain = Terrain::Farm;
+        s.grid[ai].food = 0.0;
+        s.grid[bi].terrain = Terrain::Farm;
+        s.grid[bi].food = 0.0;
+        s.tick_count = REGROW_EVERY - 1;
+        s.tick();
+        let a = s.grid[ai].food;
+        let b = s.grid[bi].food;
+        assert!(
+            a > FARM_FOOD_MAX,
+            "irrigated field should exceed base capacity (got {:.1})",
+            a
+        );
+        assert!(
+            b <= FARM_FOOD_MAX,
+            "dry field must stay at base capacity (got {:.1})",
+            b
+        );
+        assert!(a > b, "irrigation must lift yields (irrigated {:.1} dry {:.1})", a, b);
     }
 
     #[test]
