@@ -853,11 +853,20 @@ pub fn start() -> Result<(), JsValue> {
     bind_click(&document.get_element_by_id("btnHud").ok_or("no btnHud")?, &app, |a| {
         a.hud.cycle();
     })?;
+    bind_click(&document.get_element_by_id("btnTech").ok_or("no btnTech")?, &app, |a| {
+        a.hud.show_tech_tree = !a.hud.show_tech_tree;
+    })?;
     bind_click(&document.get_element_by_id("btnFontDown").ok_or("no btnFontDown")?, &app, |a| {
         a.hud.hud_font_size = (a.hud.hud_font_size - 1.0).max(7.0);
     })?;
     bind_click(&document.get_element_by_id("btnFontUp").ok_or("no btnFontUp")?, &app, |a| {
         a.hud.hud_font_size = (a.hud.hud_font_size + 1.0).min(28.0);
+    })?;
+    bind_click(&document.get_element_by_id("btnTownFontDown").ok_or("no btnTownFontDown")?, &app, |a| {
+        a.hud.town_font_size = (a.hud.town_font_size - 1.0).max(9.0);
+    })?;
+    bind_click(&document.get_element_by_id("btnTownFontUp").ok_or("no btnTownFontUp")?, &app, |a| {
+        a.hud.town_font_size = (a.hud.town_font_size + 1.0).min(26.0);
     })?;
     bind_click(&document.get_element_by_id("btnSave").ok_or("no btnSave")?, &app, |a| {
         a.save_to_local();

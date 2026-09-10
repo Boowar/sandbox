@@ -16,6 +16,7 @@ pub struct HudConfig {
     pub show_weather: bool,
     pub show_tech_tree: bool,
     pub hud_font_size: f64,
+    pub town_font_size: f64,
 }
 
 impl Default for HudConfig {
@@ -28,6 +29,7 @@ impl Default for HudConfig {
             show_weather: true,
             show_tech_tree: false,
             hud_font_size: 13.0,
+            town_font_size: 14.0,
         }
     }
 }
@@ -1011,7 +1013,7 @@ for a in &sim.animals {
     let mut lines: Vec<String> = Vec::new();
     let mut line_colors: Vec<Option<(u8, u8, u8)>> = Vec::new();
 
-    lines.push(format!("{} {}  {}  {}", day_name, season_name, weather_name, sim.date_string()));
+    lines.push(format!("{}  {}  {}  {}", sim.date_string(), season_name, weather_name, day_name));
     line_colors.push(None);
 
     let avg_mood: f32 = if sim.agents.is_empty() { 0.0 } else { sim.agents.iter().map(|a| a.mood).sum::<f32>() / sim.agents.len() as f32 };
@@ -1069,16 +1071,24 @@ for a in &sim.animals {
         let mood_s = mood_bar(town_mood);
         let row = lines.len();
         if hud.show_resources {
-            let f = resource_icon(t.stocks.food, 120.0);
-            let w = resource_icon(t.stocks.water, 120.0);
-            let o = resource_icon(t.stocks.ore, 60.0);
-            let m = resource_icon(t.stocks.meat, 60.0);
-            let g = resource_icon(t.stocks.gold, 30.0);
-            let fi = resource_icon(t.stocks.fish, 40.0);
+            let fc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Food);
+            let wc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Water);
+            let oc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Ore);
+            let mc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Meat);
+            let gc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Gold);
+            let fic = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Fish);
+            let woc = crate::sim::stock_cap(&t.built, crate::sim::ResourceKind::Wood);
+            let f = resource_icon(t.stocks.food, fc);
+            let w = resource_icon(t.stocks.water, wc);
+            let o = resource_icon(t.stocks.ore, oc);
+            let m = resource_icon(t.stocks.meat, mc);
+            let g = resource_icon(t.stocks.gold, gc);
+            let fi = resource_icon(t.stocks.fish, fic);
+            let wo = resource_icon(t.stocks.wood, woc);
             lines.push(format!(
-                "◆ {} {} pop {}  {}{}{}{}{}{}  f{:<5.0} w{:<5.0} o{:<4.0} m{:<4.0} g{:<3.0} i{:<4.0}{}{}",
-                mood_s, ruler, pop, f, w, o, m, g, fi,
-                t.stocks.food, t.stocks.water, t.stocks.ore, t.stocks.meat, t.stocks.gold, t.stocks.fish,
+                "◆ {} {} pop {}  {}{}{}{}{}{}{}  f{:<5.0} w{:<5.0} o{:<4.0} m{:<4.0} g{:<3.0} i{:<4.0} d{:<4.0}{}{}",
+                mood_s, ruler, pop, f, w, o, m, g, fi, wo,
+                t.stocks.food, t.stocks.water, t.stocks.ore, t.stocks.meat, t.stocks.gold, t.stocks.fish, t.stocks.wood,
                 if mark.is_empty() { String::new() } else { format!(" {}", mark) }, emp_mark
             ));
         } else {
@@ -1110,15 +1120,7 @@ for a in &sim.animals {
     lines.push(format!("{} {:.0}s  x{:.1}  fps{:.0}{}", weather_name, sim.weather_left * 0.08, speed, fps, if paused { " [PAUSED]" } else { "" }));
     line_colors.push(None);
 
-    let pw = (350.0 + (hud.hud_font_size - 11.0) * 12.0).max(350.0);
     let line_h = hud.hud_font_size + 4.0;
-    let ph = 14.0 + lines.len() as f64 * line_h;
-    ctx.set_fill_style_str("rgba(10,14,18,0.78)");
-    ctx.fill_rect(4.0, 4.0, pw, ph);
-    ctx.set_stroke_style_str("rgb(60,68,80)");
-    ctx.begin_path();
-    ctx.rect(4.0, 4.0, pw, ph);
-    ctx.stroke();
     ctx.set_font(&format!("{}px ui-monospace, monospace", hud.hud_font_size));
     let mut chips: Vec<Option<(u8, u8, u8)>> = vec![None; lines.len()];
     for (row, ti) in town_rows {
@@ -1126,6 +1128,22 @@ for a in &sim.animals {
         let (r, g, b) = if t.alive { town_col[ti] } else { (120, 126, 134) };
         chips[row] = Some((r, g, b));
     }
+    let mut max_w: f64 = 0.0;
+    for (i, l) in lines.iter().enumerate() {
+        let x_off = 14.0 + if chips[i].is_some() { 12.0 } else { 0.0 };
+        let w = ctx.measure_text(l).map(|tm| tm.width()).unwrap_or(0.0) + x_off;
+        if w > max_w {
+            max_w = w;
+        }
+    }
+    let pw = (max_w + 16.0).max(120.0);
+    let ph = 14.0 + lines.len() as f64 * line_h;
+    ctx.set_fill_style_str("rgba(10,14,18,0.78)");
+    ctx.fill_rect(4.0, 4.0, pw, ph);
+    ctx.set_stroke_style_str("rgb(60,68,80)");
+    ctx.begin_path();
+    ctx.rect(4.0, 4.0, pw, ph);
+    ctx.stroke();
     for (i, l) in lines.iter().enumerate() {
         if let Some((r, g, b)) = chips[i] {
             ctx.set_fill_style_str(&format!("rgb({},{},{})", r, g, b));
@@ -1154,7 +1172,7 @@ for a in &sim.animals {
         };
         let pw = 340.0;
         let ph = 210.0;
-        let px = 4.0;
+        let px = cw - pw - 4.0;
         let py = 4.0;
         ctx.set_fill_style_str("rgba(10,14,18,0.92)");
         ctx.fill_rect(px, py, pw, ph);
@@ -1362,9 +1380,9 @@ for a in &sim.animals {
             p.push(String::new());
             p.push("Buildings:".into());
             if houses > 0 { p.push(format!("  🏠 House    ({}) +8 pop cap", houses)); }
-            if wells > 0 { p.push(format!("  ⛲ Well     ({}) +1.0 water/tick", wells)); }
-            if farms > 0 { p.push(format!("  🌾 Farm     ({}) feeds town, fields", farms)); }
-            if posts > 0 { p.push(format!("  🏦 Trade    ({}) +0.03 gold/tick", posts)); }
+            if wells > 0 { p.push(format!("  ⛲ Well     ({}) +{:.1} water/tick", wells, crate::sim::WELL_WATER_PER_TICK)); }
+            if farms > 0 { p.push(format!("  🌾 Farm     ({}) +{:.1} food/tick, fields", farms, crate::sim::FARM_FOOD_PER_TICK)); }
+            if posts > 0 { p.push(format!("  🏦 Trade    ({}) +{:.2} gold/tick", posts, crate::sim::TRADE_TRICKLE)); }
             if clinic > 0 { p.push(format!("  ⛑ Clinic   ({}) cures plague", clinic)); }
             if wall > 0 { p.push(format!("  ⛋ Wall     ({}) +0.15 defense each", wall)); }
             if barracks > 0 { p.push(format!("  ⛩ Barracks ({}) guards, fights war", barracks)); }
@@ -1372,7 +1390,7 @@ for a in &sim.animals {
             if smith > 0 { p.push(format!("  🔨 Smithy   ({}) +1 build/tick", smith)); }
             if lib > 0 { p.push(format!("  📚 Library  ({}) +1.5 sci/tick", lib)); }
             if temple > 0 { p.push(format!("  🛕 Temple   ({}) priests, +faith", temple)); }
-            if warehouse > 0 { p.push(format!("  📦 Warehouse ({}) +40 food/water, +25 ore", warehouse)); }
+            if warehouse > 0 { p.push(format!("  📦 Warehouse ({}) +40 food/water, +25 ore, +20 meat/fish, +30 wood, +100 gold", warehouse)); }
             if sawmill > 0 { p.push(format!("  🪚 Sawmill   ({}) +0.8 wood/tick", sawmill)); }
             if fence > 0 { p.push(format!("  🪵 Fence     ({}) +0.05 def, +3 territory", fence)); }
             if outpost > 0 { p.push(format!("  🗼 Outpost   ({}) +5 territory", outpost)); }
@@ -1484,17 +1502,25 @@ for a in &sim.animals {
                 p.push("☠ РАЗОРЁН".to_string());
             }
 
-            let pw = 230.0;
-            let ph = 14.0 + p.len() as f64 * 15.0;
+            let town_lh = hud.town_font_size + 4.0;
             let px = 4.0;
-            let py = 4.0 + 14.0 + lines.len() as f64 * 15.0 + 8.0;
+            let py = 4.0 + 14.0 + lines.len() as f64 * line_h + 8.0;
+            ctx.set_font(&format!("{}px ui-monospace, monospace", hud.town_font_size));
+            let mut max_w: f64 = 0.0;
+            for l in &p {
+                let w = ctx.measure_text(l).map(|tm| tm.width()).unwrap_or(0.0) + 8.0;
+                if w > max_w {
+                    max_w = w;
+                }
+            }
+            let pw = (max_w + 8.0).max(120.0);
+            let ph = 14.0 + p.len() as f64 * town_lh;
             ctx.set_fill_style_str("rgba(10,14,18,0.90)");
             ctx.fill_rect(px, py, pw, ph);
             ctx.set_stroke_style_str(&format!("rgb({},{},{})", cr, cg, cb));
             ctx.begin_path();
             ctx.rect(px, py, pw, ph);
             ctx.stroke();
-            ctx.set_font("12px ui-monospace, monospace");
             for (i, l) in p.iter().enumerate() {
                 if i == 0 {
                     ctx.set_fill_style_str(&format!("rgb({},{},{})", cr, cg, cb));
@@ -1503,7 +1529,7 @@ for a in &sim.animals {
                 } else {
                     ctx.set_fill_style_str("rgb(220,228,238)");
                 }
-                let _ = ctx.fill_text(l, px + 8.0, py + 14.0 + i as f64 * 15.0);
+                let _ = ctx.fill_text(l, px + 8.0, py + 14.0 + i as f64 * town_lh);
             }
         }
     }

@@ -103,14 +103,14 @@ const BASE_WOOD_CAP: f32 = 100.0;
 const WAREHOUSE_WOOD_CAP: f32 = 30.0;
 const SAWMILL_COST: f32 = 35.0;
 const SAWMILL_WOOD_PER_TICK: f32 = 0.8;
-const FARM_FOOD_PER_TICK: f32 = 2.5;
+pub const FARM_FOOD_PER_TICK: f32 = 2.5;
 const FENCE_COST: f32 = 15.0;
 const FENCE_DEFENSE: f32 = 0.05;
 const FENCE_RADIUS: i32 = 3;
 const OUTPOST_COST: f32 = 60.0;
 const OUTPOST_RADIUS: i32 = 5;
 const TRADE_POST_COST: f32 = 40.0;
-const TRADE_TRICKLE: f32 = 0.2;
+pub const TRADE_TRICKLE: f32 = 0.2;
 const AUTO_TRADEPOST_FOOD: f32 = 80.0;
 const AUTO_TRADEPOST_WATER: f32 = 60.0;
 const AUTO_SANCTUARY_FAITH: f32 = 10.0;
@@ -390,7 +390,7 @@ impl SettlementTier {
 }
 const PEACE_CHANCE_PER_TICK: f32 = 0.02;
 const PEACE_FOOD_WATER_MIN: f32 = 70.0;
-const WELL_WATER_PER_TICK: f32 = 1.5;
+pub const WELL_WATER_PER_TICK: f32 = 1.5;
 
 const REVELATION_PER_TICK: f32 = 0.7;
 const PROPHECY_COST: f32 = 50.0;
