@@ -1396,7 +1396,7 @@ for a in &sim.animals {
             p.push("Buildings:".into());
             if houses > 0 { p.push(format!("  🏠 House    ({}) +8 pop cap", houses)); }
             if wells > 0 { p.push(format!("  ⛲ Well     ({}) +{:.1} water/tick", wells, crate::sim::WELL_WATER_PER_TICK)); }
-            if farms > 0 { p.push(format!("  🌾 Farm     ({}) +{:.1} food/tick, fields", farms, crate::sim::FARM_FOOD_PER_TICK)); }
+            if farms > 0 { p.push(format!("  🌾 Farm     ({}) +{:.1} food/tick (амбар ×0.8 в./1.0 л./1.25 о./0.5 зим., поля зимой пустуют)", farms, crate::sim::FARM_FOOD_PER_TICK)); }
             if posts > 0 { p.push(format!("  🏦 Trade    ({}) +{:.2} gold/tick", posts, crate::sim::TRADE_TRICKLE)); }
             if clinic > 0 { p.push(format!("  ⛑ Clinic   ({}) cures plague", clinic)); }
             if wall > 0 { p.push(format!("  ⛋ Wall     ({}) +0.15 defense each", wall)); }

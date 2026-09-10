@@ -56,6 +56,9 @@ const PROSPERITY_EVERY: u64 = 2;
 const COUPLE_BIRTH_EVERY: u64 = MARRIAGE_EVERY;
 const REGROW_EVERY: u64 = DAY_LEN;
 const FOREST_REGROW_EVERY: u64 = SEASON_LEN * 4 * 10;
+const HEAT_WOOD_PER_DAY: f32 = 1.0;
+const COLD_HUNGER_BONUS: f32 = 0.8;
+const FISH_REGEN_RAIN_BONUS: f32 = 8.0;
 const MAX_AGENTS: usize = 500;
 const BIRTH_MIN_FOOD: f32 = 30.0;
 const BIRTH_MIN_WATER: f32 = 20.0;
@@ -214,6 +217,24 @@ pub enum Season {
     Summer,
     Autumn,
     Winter,
+}
+
+pub fn farm_season_mult(season: Season) -> f32 {
+    match season {
+        Season::Spring => 0.7,
+        Season::Summer => 1.1,
+        Season::Autumn => 1.7,
+        Season::Winter => 0.0,
+    }
+}
+
+pub fn granary_season_mult(season: Season) -> f32 {
+    match season {
+        Season::Spring => 0.8,
+        Season::Summer => 1.0,
+        Season::Autumn => 1.25,
+        Season::Winter => 0.5,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
@@ -2149,6 +2170,7 @@ impl Sim {
                 Season::Winter => Season::Spring,
             };
         }
+        let winter = self.season == Season::Winter;
 
         self.rebuild_cache();
         for ti in 0..self.towns.len() {
@@ -2171,6 +2193,12 @@ impl Sim {
         };
         let has_mastery = self.towns.iter().any(|t| t.researched.contains(&Tech::Mastery));
         let mastery_mult = if has_mastery { 0.9 } else { 1.0 };
+        let heated: Vec<bool> = (0..self.towns.len())
+            .map(|ti| {
+                let t = &self.towns[ti];
+                winter && t.alive && self.town_pop[ti] > 0 && t.stocks.wood >= HEAT_WOOD_PER_DAY
+            })
+            .collect();
         for a in self.agents.iter_mut() {
             a.age = a.age.saturating_add(1);
             let mut metabolism = if a.age < CHILD_AGE { 0.8 } else { 1.0 };
@@ -2178,7 +2206,8 @@ impl Sim {
                 metabolism = 1.25;
             }
             let sick_rate = if a.sick > 0 { 1.4 * metabolism } else { metabolism };
-            a.hunger = (a.hunger + hunger_rate * sick_rate * mastery_mult).min(HUNGER_MAX);
+            let cold = winter && !heated.get(a.home).copied().unwrap_or(false);
+            a.hunger = (a.hunger + hunger_rate * sick_rate * mastery_mult + if cold { COLD_HUNGER_BONUS } else { 0.0 }).min(HUNGER_MAX);
             let thirst_sick = if a.sick > 0 { 1.3 * metabolism } else { metabolism };
             a.thirst = (a.thirst + thirst_rate * thirst_sick * mastery_mult).min(140.0);
         }
@@ -2194,7 +2223,12 @@ impl Sim {
                 Weather::Frost => 30.0,
                 _ => 50.0,
             };
-            let season_crop = if self.season == Season::Winter { 0.6 } else { 1.0 };
+            let season_crop = farm_season_mult(self.season);
+            let fish_mult = match self.season {
+                Season::Spring => 2.0,
+                Season::Winter => 0.25,
+                _ => 1.0,
+            };
             let weather_farm = match self.weather {
                 Weather::Heat => 0.7,
                 Weather::Frost => 0.5,
@@ -2217,7 +2251,8 @@ impl Sim {
                         }
                         Terrain::Water => {
                             self.grid[i].water = (self.grid[i].water + water_regen).min(WATER_MAX);
-                            self.grid[i].food = (self.grid[i].food + 6.0).min(8.0);
+                            let fish_regen = 6.0 * fish_mult + if rain { FISH_REGEN_RAIN_BONUS } else { 0.0 };
+                            self.grid[i].food = (self.grid[i].food + fish_regen).min(if self.season == Season::Spring || rain { 12.0 } else { 8.0 });
                             if rain
                                 && self.grid[i].water >= WATER_MAX * 0.85
                                 && self.brain(x as i32, y as i32, dt) % 9000 < RAIN_LAKE_CHANCE
@@ -2246,7 +2281,8 @@ impl Sim {
                             self.grid[i].food = (self.grid[i].food + ber).min(FOOD_MAX * 0.8);
                         }
                         Terrain::CoralReef => {
-                            self.grid[i].food = (self.grid[i].food + 8.0).min(8.0);
+                            let reef_regen = 8.0 * fish_mult + if rain { FISH_REGEN_RAIN_BONUS } else { 0.0 };
+                            self.grid[i].food = (self.grid[i].food + reef_regen).min(if self.season == Season::Spring || rain { 12.0 } else { 8.0 });
                         }
                         _ => {}
                     }
@@ -2267,6 +2303,13 @@ impl Sim {
                     }
                 }
             }
+            if winter {
+                for (ti, t) in self.towns.iter_mut().enumerate() {
+                    if t.alive && self.town_pop[ti] > 0 {
+                        t.stocks.wood = (t.stocks.wood - HEAT_WOOD_PER_DAY).max(0.0);
+                    }
+                }
+            }
         }
 
         if self.tick_count % SEASON_LEN == 0 {
@@ -2275,7 +2318,11 @@ impl Sim {
             let bonus = if abundant { 20.0 } else { 0.0 } + if proph_harvest { 40.0 } else { 0.0 };
             for (i, c) in self.grid.iter_mut().enumerate() {
                 if c.terrain == Terrain::Berries && !self.roads[i] {
-                    c.food = (c.food + BERRY_REGEN + bonus).min(BERRY_MAX);
+                    if winter {
+                        c.food = 0.0;
+                    } else {
+                        c.food = (c.food + BERRY_REGEN + bonus).min(BERRY_MAX);
+                    }
                 }
             }
         }
@@ -2317,7 +2364,7 @@ impl Sim {
                     Weather::Frost => 0.5,
                     _ => 1.0,
                 };
-                let season_farm_mult = if self.season == Season::Winter { 0.6 } else { 1.0 };
+                let season_farm_mult = granary_season_mult(self.season);
                 let agri_mult = if t.researched.contains(&Tech::Agriculture) { 1.25 } else { 1.0 };
                 t.stocks.food = clamp_stock(t.stocks.food, FARM_FOOD_PER_TICK * farms as f32 * wmult * farm_mult * season_farm_mult * agri_mult, food_cap);
             }
@@ -5896,8 +5943,8 @@ mod tests {
         let mut s = Sim::new(11);
         for t in s.towns.iter_mut() {
             t.cap = 200;
-            t.stocks.food = 2000.0;
-            t.stocks.water = 2000.0;
+            t.stocks.food = 100000.0;
+            t.stocks.water = 100000.0;
             t.stocks.ore = 500.0;
             t.stocks.wood = 2000.0;
             t.stocks.meat = 500.0;
@@ -6562,6 +6609,151 @@ mod tests {
             peak > 0.5,
             "farm food should regrow at some point (peak {})",
             peak,
+        );
+    }
+
+    #[test]
+    fn farms_idle_in_winter_and_yield_in_summer() {
+        let mut s = Sim::new(310);
+        s.agents.clear();
+        s.weather = Weather::Clear;
+        s.weather_left = 100000.0;
+        s.plant_fields(s.towns[0].x, s.towns[0].y);
+        let fidx = s.grid.iter().position(|c| c.terrain == Terrain::Farm).unwrap();
+        s.tick_count = SEASON_LEN + 1;
+        s.season = Season::Winter;
+        s.grid[fidx].food = 0.0;
+        while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+            s.tick();
+        }
+        s.tick();
+        assert_eq!(s.grid[fidx].food, 0.0, "fields must lie idle in winter");
+        s.tick_count = 2 * SEASON_LEN + 1;
+        s.season = Season::Summer;
+        s.grid[fidx].food = 0.0;
+        while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+            s.tick();
+        }
+        s.tick();
+        assert!(s.grid[fidx].food > 0.0, "fields should yield in summer");
+    }
+
+    #[test]
+    fn berries_vanish_in_winter_and_regen_in_spring() {
+        let mut s = Sim::new(611);
+        s.agents.clear();
+        s.weather = Weather::Clear;
+        s.weather_left = 100000.0;
+        s.tick_count = SEASON_LEN - 1;
+        s.season = Season::Autumn;
+        let bx = s.grid.iter().position(|c| c.terrain == Terrain::Berries).unwrap();
+        s.grid[bx].food = BERRY_MAX;
+        s.tick();
+        assert_eq!(s.season, Season::Winter);
+        assert_eq!(s.grid[bx].food, 0.0, "berries must empty when winter begins");
+        s.tick_count = SEASON_LEN - 1;
+        s.season = Season::Winter;
+        s.tick();
+        assert_eq!(s.season, Season::Spring);
+        assert!(
+            s.grid[bx].food >= BERRY_MAX,
+            "berries must regrow in spring (got {})",
+            s.grid[bx].food
+        );
+    }
+
+    #[test]
+    fn fish_spawns_in_spring_and_rain_and_wanes_in_winter() {
+        let mut s = Sim::new(411);
+        s.agents.clear();
+        s.weather = Weather::Clear;
+        s.weather_left = 100000.0;
+        let wx = s.grid.iter().position(|c| c.terrain == Terrain::Water).unwrap();
+        s.tick_count = 2 * SEASON_LEN + 1;
+        s.season = Season::Spring;
+        s.grid[wx].food = 0.0;
+        while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+            s.tick();
+        }
+        s.tick();
+        let spring = s.grid[wx].food;
+        assert!(spring >= 11.0, "spring should spawn fish (got {})", spring);
+        s.tick_count = 3 * SEASON_LEN + 1;
+        s.season = Season::Winter;
+        s.grid[wx].food = 0.0;
+        while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+            s.tick();
+        }
+        s.tick();
+        let winter = s.grid[wx].food;
+        assert!(winter <= 2.0, "winter should starve fish (got {})", winter);
+        s.weather = Weather::Rain;
+        s.tick_count = 4 * SEASON_LEN + 1;
+        s.season = Season::Winter;
+        s.grid[wx].food = 0.0;
+        while s.tick_count % REGROW_EVERY != REGROW_EVERY - 1 {
+            s.tick();
+        }
+        s.tick();
+        let rain = s.grid[wx].food;
+        assert!(rain >= 9.0, "rain should boost fish spawning (got {})", rain);
+    }
+
+    #[test]
+    fn winter_heating_consumes_wood_and_cold_hurts() {
+        let burn = |season: Season| -> f32 {
+            let mut s = Sim::new(919);
+            s.weather = Weather::Clear;
+            s.weather_left = 100000.0;
+            s.towns[0].stocks.wood = 50.0;
+            s.tick_count = SEASON_LEN + 1;
+            s.season = season;
+            let before = s.towns[0].stocks.wood;
+            for _ in 0..DAY_LEN {
+                s.tick();
+            }
+            before - s.towns[0].stocks.wood
+        };
+        let winter = burn(Season::Winter);
+        let summer = burn(Season::Summer);
+        assert!(winter > 0.0, "winter should actually consume wood (burned {})", winter);
+        assert!(
+            winter - summer >= 0.8,
+            "winter must burn firewood (winter {:.1} summer {:.1})",
+            winter,
+            summer
+        );
+
+        let make = |wood: f32| -> (Sim, Agent) {
+            let mut s = Sim::new(929);
+            s.weather = Weather::Clear;
+            s.weather_left = 100000.0;
+            s.tick_count = SEASON_LEN + 1;
+            s.season = Season::Winter;
+            s.towns[0].stocks.wood = wood;
+            let mut a = migration_agent(0, s.towns[0].x, s.towns[0].y, 5000, 0);
+            a.hunger = 5.0;
+            a.thirst = 20.0;
+            s.agents.clear();
+            s.agents.push(a);
+            let mut tracked = migration_agent(0, s.towns[0].x, s.towns[0].y, 5000, 0);
+            tracked.hunger = 5.0;
+            tracked.thirst = 20.0;
+            (s, tracked)
+        };
+        let (mut s1, a1) = make(0.0);
+        let (mut s2, a2) = make(100.0);
+        for _ in 0..10 {
+            s1.tick();
+            s2.tick();
+        }
+        let h1 = s1.agents.first().unwrap().hunger;
+        let h2 = s2.agents.first().unwrap().hunger;
+        assert!(
+            h1 - a1.hunger > h2 - a2.hunger + 5.0,
+            "unheated town should suffer extra hunger (cold gain {:.1} warm gain {:.1})",
+            h1 - a1.hunger,
+            h2 - a2.hunger
         );
     }
 
