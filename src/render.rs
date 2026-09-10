@@ -885,6 +885,12 @@ pub fn draw(
             ctx.set_fill_style_str("rgb(255,214,196)");
             ctx.fill_rect(fx + 1.0, fy + 2.0, 1.0, 1.0);
         }
+        if a.sex == crate::sim::Sex::Male {
+            ctx.set_fill_style_str("rgb(120,180,255)");
+        } else {
+            ctx.set_fill_style_str("rgb(255,130,160)");
+        }
+        ctx.fill_rect(fx + 4.0, fy + 4.0, 1.0, 1.0);
         if a.age > crate::sim::OLD_AGE {
             ctx.set_fill_style_str("rgb(238,242,247)");
             ctx.fill_rect(fx, fy - 1.0, 2.0, 1.0);
@@ -1270,6 +1276,21 @@ for a in &sim.animals {
             let families: Vec<_> = sim.families.iter()
                 .filter(|f| f.town == si && !f.extinct)
                 .collect();
+            let fam_sex: std::collections::HashMap<usize, (usize, usize)> = {
+                let mut m = std::collections::HashMap::new();
+                for a in sim.agents.iter() {
+                    if a.home != si {
+                        continue;
+                    }
+                    let e = m.entry(a.family).or_insert((0, 0));
+                    if a.sex == crate::sim::Sex::Male {
+                        e.0 += 1;
+                    } else {
+                        e.1 += 1;
+                    }
+                }
+                m
+            };
 
             let mut p: Vec<String> = Vec::new();
             let mood_s = mood_bar(avg_mood);
@@ -1375,7 +1396,8 @@ for a in &sim.animals {
             if !families.is_empty() {
                 let fam_str = families.iter().map(|f| {
                     let role_s = if f.role != Role::Worker { format!("{:?}", f.role) } else { String::new() };
-                    format!("{} ({}{}, {})", f.name, f.members, if f.children > 0 { format!("+{}", f.children) } else { String::new() }, role_s)
+                    let (fm, ff) = fam_sex.get(&f.id).copied().unwrap_or((0, 0));
+                    format!("{} ({}{} ♂{}♀{}{})", f.name, f.members, if f.children > 0 { format!("+{}", f.children) } else { String::new() }, fm, ff, role_s)
                 }).collect::<Vec<_>>().join("  ");
                 p.push(format!("👑 {}", fam_str));
             }

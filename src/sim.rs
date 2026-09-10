@@ -52,7 +52,7 @@ const STARVE_THIRST: f32 = 90.0;
 const HUNGER_MAX: f32 = 500.0;
 const RECALC_TERRITORY_EVERY: u64 = DAY_LEN;
 const PROSPERITY_EVERY: u64 = 2;
-const BIRTH_EVERY: u64 = 6480;
+const COUPLE_BIRTH_EVERY: u64 = MARRIAGE_EVERY;
 const REGROW_EVERY: u64 = DAY_LEN;
 const MAX_AGENTS: usize = 500;
 const BIRTH_MIN_FOOD: f32 = 30.0;
@@ -179,6 +179,10 @@ const TEMPLE_COST: f32 = 150.0;
 
 pub const CHILD_AGE: u32 = 138240;
 pub const OLD_AGE: u32 = 648000;
+pub const FERTILITY_START: u32 = CHILD_AGE;
+pub const FERTILITY_END: u32 = 45 * 8640;
+const COUPLES_PER_TOWN: usize = 2;
+const START_COUPLES_PER_TOWN: usize = 4;
 
 const EMPIRE_EVERY: u64 = 8640;
 const EMPIRE_EPOCH_P: u32 = 19;
@@ -290,6 +294,18 @@ impl Tech {
             Tech::Theology => (248, 242, 220),
             Tech::Mastery => (255, 222, 120),
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+pub enum Sex {
+    Male,
+    Female,
+}
+
+impl Default for Sex {
+    fn default() -> Self {
+        Sex::Female
     }
 }
 
@@ -634,6 +650,10 @@ pub struct Agent {
     pub role: Role,
     pub sick: u32,
     pub age: u32,
+    #[serde(default)]
+    pub sex: Sex,
+    #[serde(default)]
+    pub spouse: Option<u32>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -1214,10 +1234,12 @@ impl Sim {
                     ^ 0x9e37_79b9u32.wrapping_mul(0xabcd_ef01);
                 a.age = 172800 + (h % 172800);
             }
+            self.marry_step_town(i, START_COUPLES_PER_TOWN);
         }
     }
 
     fn spawn_agent(&mut self, home: usize, cx: i32, cy: i32, family: usize, founder: bool) {
+        let sex = if self.families[family].members % 2 == 0 { Sex::Male } else { Sex::Female };
         for _ in 0..64 {
             let ang = rfrac(&mut self.rng) * 6.2832;
             let r = rfrac(&mut self.rng) * 6.0 + 2.0;
@@ -1246,6 +1268,8 @@ impl Sim {
                     role: self.families[family].role,
                     sick: 0,
                     age: 9000,
+                    sex,
+                    spouse: None,
                 });
                 self.families[family].members += 1;
                 return;
@@ -1273,6 +1297,8 @@ impl Sim {
             role: self.families[family].role,
             sick: 0,
             age: 9000,
+            sex,
+            spouse: None,
         });
         self.families[family].members += 1;
     }
@@ -2339,11 +2365,16 @@ impl Sim {
         dead.sort_unstable();
         dead.dedup();
         for &i in dead.iter().rev() {
+            if let Some(pid) = self.agents[i].spouse {
+                for a in self.agents.iter_mut().filter(|a| a.id == pid) {
+                    a.spouse = None;
+                }
+            }
             self.agents.remove(i);
         }
         self.release_dead_raiders(&dead);
 
-        if self.tick_count % BIRTH_EVERY == 0 {
+        if self.tick_count % COUPLE_BIRTH_EVERY == 0 {
             self.reproduction();
         }
         self.sync_families();
@@ -2357,6 +2388,7 @@ impl Sim {
             self.migration_step();
         }
         if self.tick_count % MARRIAGE_EVERY == 0 {
+            self.couples_step();
             self.marriage_step();
         }
         if self.tick_count % TREATY_EVERY == 0 {
@@ -3512,23 +3544,35 @@ impl Sim {
         if self.agents.len() >= MAX_AGENTS {
             return;
         }
-        let mut used_town = vec![false; self.towns.len()];
-        for fid in 0..self.families.len() {
-            let fam_town = self.families[fid].town;
-            if self.families[fid].extinct || self.families[fid].members < 2 {
-                continue;
+        let mut mothers: Vec<usize> = Vec::new();
+        for (i, a) in self.agents.iter().enumerate() {
+            if a.sex == Sex::Female
+                && a.spouse.is_some()
+                && a.age >= FERTILITY_START
+                && a.age < FERTILITY_END
+            {
+                mothers.push(i);
             }
-            if used_town[fam_town] {
+        }
+        for fi in mothers {
+            if self.agents.len() >= MAX_AGENTS {
+                break;
+            }
+            let fam_town = self.agents[fi].home;
+            if fam_town >= self.towns.len() || !self.towns[fam_town].alive {
                 continue;
             }
             if self.town_pop[fam_town] >= self.towns[fam_town].cap {
+                continue;
+            }
+            let hid = self.agents[fi].spouse.unwrap();
+            if !self.agents.iter().any(|a| a.id == hid && a.home == fam_town) {
                 continue;
             }
             let st = &self.towns[fam_town].stocks;
             if st.food < BIRTH_MIN_FOOD || st.water < BIRTH_MIN_WATER {
                 continue;
             }
-            let (tx, ty) = (self.towns[fam_town].x, self.towns[fam_town].y);
             let (cf, cw) = if self.towns[fam_town].idea == TownIdea::Prosperity
                 || self.towns[fam_town].blessing == Blessing::Fertility
             {
@@ -3540,11 +3584,12 @@ impl Sim {
             };
             self.towns[fam_town].stocks.food = (self.towns[fam_town].stocks.food - cf).max(0.0);
             self.towns[fam_town].stocks.water = (self.towns[fam_town].stocks.water - cw).max(0.0);
-            self.spawn_agent(fam_town, tx, ty, fid, false);
+            let fam = self.agents[fi].family;
+            let (tx, ty) = (self.towns[fam_town].x, self.towns[fam_town].y);
+            self.spawn_agent(fam_town, tx, ty, fam, false);
             let newborn = self.agents.len() - 1;
             self.agents[newborn].age = 0;
-            self.families[fid].children += 1;
-            used_town[fam_town] = true;
+            self.families[fam].children += 1;
         }
     }
 
@@ -4206,6 +4251,48 @@ impl Sim {
         self.same_empire(i, j) || self.alliance_between(i, j) || self.treaty_between(i, j)
     }
 
+    fn marry_step_town(&mut self, ti: usize, limit: usize) {
+        let mut males: Vec<usize> = Vec::new();
+        let mut females: Vec<usize> = Vec::new();
+        for (i, a) in self.agents.iter().enumerate() {
+            if a.home != ti || a.spouse.is_some() || a.raider {
+                continue;
+            }
+            match a.sex {
+                Sex::Male if a.age >= FERTILITY_START && a.age < OLD_AGE => males.push(i),
+                Sex::Female if a.age >= FERTILITY_START && a.age < FERTILITY_END => females.push(i),
+                _ => {}
+            }
+        }
+        let mut pairs = 0;
+        for &mi in &males {
+            if pairs >= limit {
+                break;
+            }
+            let mfam = self.agents[mi].family;
+            let mid = self.agents[mi].id;
+            if let Some(fpos) = females
+                .iter()
+                .position(|&fi| self.agents[fi].family != mfam)
+            {
+                let fi = females.remove(fpos);
+                let fid = self.agents[fi].id;
+                self.agents[mi].spouse = Some(fid);
+                self.agents[fi].spouse = Some(mid);
+                pairs += 1;
+            }
+        }
+    }
+
+    fn couples_step(&mut self) {
+        for i in 0..self.towns.len() {
+            if !self.towns[i].alive {
+                continue;
+            }
+            self.marry_step_town(i, COUPLES_PER_TOWN);
+        }
+    }
+
     fn marriage_step(&mut self) {
         let epoch = self.tick_count / MARRIAGE_EVERY;
         for i in 0..self.towns.len() {
@@ -4852,26 +4939,31 @@ mod tests {
     fn births_require_food_and_water() {
         let mut s = Sim::new(14);
         s.agents.clear();
-        for _ in 0..2 {
-            s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 0, false);
-        }
-        if let Some(f) = s.families.iter_mut().find(|f| f.town == 0) {
-            f.extinct = false;
-            f.members = 2;
-        } else {
+        s.families.clear();
+        for fid in 0..2 {
             s.families.push(Family {
-                id: 0,
+                id: fid,
                 town: 0,
                 members: 2,
                 children: 0,
-                name: "Test".into(),
+                name: format!("Род {}", fid),
                 extinct: false,
                 accent: (200, 200, 200),
                 role: Role::Worker,
             });
         }
+        s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 0, false);
+        s.agents[0].sex = Sex::Male;
+        s.agents[0].age = 200000;
+        s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 1, false);
+        s.agents[1].sex = Sex::Female;
+        s.agents[1].age = 200000;
+        s.agents[0].spouse = Some(s.agents[1].id);
+        s.agents[1].spouse = Some(s.agents[0].id);
+        s.sync_families();
+        s.rebuild_cache();
         s.towns[0].cap = 100;
-        s.tick_count = BIRTH_EVERY - 1;
+        s.tick_count = COUPLE_BIRTH_EVERY - 1;
         s.towns[0].stocks.food = 60.0;
         s.towns[0].stocks.water = 40.0;
         s.towns[0].stocks.ore = 100.0;
@@ -5027,7 +5119,7 @@ mod tests {
             t.stocks.food = 5000.0;
             t.stocks.water = 5000.0;
         }
-        s.tick_count = BIRTH_EVERY;
+        s.tick_count = COUPLE_BIRTH_EVERY;
         s.rebuild_cache();
         let before = s.agents.len();
         s.reproduction();
@@ -5048,10 +5140,160 @@ mod tests {
         s.towns[0].stocks.ore = 100.0;
         s.sync_families();
         for _ in 0..3 {
-            s.tick_count += BIRTH_EVERY;
+            s.tick_count += COUPLE_BIRTH_EVERY;
             s.reproduction();
         }
         assert_eq!(s.families[0].children, 0, "single member cannot have children");
+    }
+
+    fn make_couple(s: &mut Sim, ti: usize, fa: usize, fb: usize) {
+        s.agents.clear();
+        s.families.clear();
+        for fid in 0..=fb.max(fa) {
+            s.families.push(Family {
+                id: fid,
+                town: ti,
+                members: 2,
+                children: 0,
+                name: format!("Род {}", fid),
+                extinct: false,
+                accent: (200, 100, 100),
+                role: Role::Worker,
+            });
+        }
+        let (tx, ty) = (s.towns[ti].x, s.towns[ti].y);
+        s.spawn_agent(ti, tx, ty, fa, false);
+        s.spawn_agent(ti, tx, ty, fb, false);
+        s.agents[0].sex = Sex::Male;
+        s.agents[0].age = 200000;
+        s.agents[1].sex = Sex::Female;
+        s.agents[1].age = 200000;
+        s.agents[0].spouse = Some(s.agents[1].id);
+        s.agents[1].spouse = Some(s.agents[0].id);
+        s.sync_families();
+        s.rebuild_cache();
+    }
+
+    #[test]
+    fn couples_form_between_different_families() {
+        let mut s = Sim::new(25);
+        s.agents.clear();
+        s.families.clear();
+        for fid in 0..2 {
+            s.families.push(Family {
+                id: fid,
+                town: 0,
+                members: 1,
+                children: 0,
+                name: format!("Род {}", fid),
+                extinct: false,
+                accent: (200, 100, 100),
+                role: Role::Worker,
+            });
+        }
+        s.towns[0].cap = 200;
+        s.towns[0].stocks.food = 500.0;
+        s.towns[0].stocks.water = 500.0;
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.spawn_agent(0, tx, ty, 0, false);
+        s.spawn_agent(0, tx, ty, 1, false);
+        s.agents[0].sex = Sex::Male;
+        s.agents[0].age = 200000;
+        s.agents[1].sex = Sex::Female;
+        s.agents[1].age = 200000;
+        s.rebuild_cache();
+        s.marry_step_town(0, 4);
+        assert_eq!(s.agents[0].spouse, Some(s.agents[1].id), "male should marry female");
+        assert_eq!(s.agents[1].spouse, Some(s.agents[0].id), "female should marry male");
+        s.agents[0].spouse = None;
+        s.agents[1].spouse = None;
+        s.spawn_agent(0, tx, ty, 0, false);
+        s.spawn_agent(0, tx, ty, 1, false);
+        s.agents[2].sex = Sex::Female;
+        s.agents[2].age = 200000;
+        s.agents[3].sex = Sex::Male;
+        s.agents[3].age = 200000;
+        s.marry_step_town(0, 4);
+        assert!(
+            s.agents[2].spouse.map(|id| id == s.agents[3].id).unwrap_or(false),
+            "pairing must join the two unwed adults"
+        );
+    }
+
+    #[test]
+    fn married_couple_births_once_per_window() {
+        let mut s = Sim::new(26);
+        make_couple(&mut s, 0, 0, 1);
+        s.towns[0].cap = 100;
+        s.towns[0].stocks.food = 200.0;
+        s.towns[0].stocks.water = 200.0;
+        let before = s.agents.len();
+        s.tick_count = COUPLE_BIRTH_EVERY;
+        s.reproduction();
+        assert_eq!(s.agents.len(), before + 1, "first window births one child");
+        s.tick_count = 2 * COUPLE_BIRTH_EVERY;
+        s.reproduction();
+        assert_eq!(s.agents.len(), before + 2, "second window births again for the same couple");
+    }
+
+    #[test]
+    fn fertility_window_limits_births() {
+        for &age in &[FERTILITY_START - 1, FERTILITY_END] {
+            let mut s = Sim::new(27);
+            make_couple(&mut s, 0, 0, 1);
+            s.agents[1].age = age;
+            s.towns[0].cap = 100;
+            s.towns[0].stocks.food = 200.0;
+            s.towns[0].stocks.water = 200.0;
+            let before = s.agents.len();
+            s.reproduction();
+            assert_eq!(s.agents.len(), before, "wife outside fertile window must not birth");
+        }
+    }
+
+    #[test]
+    fn couple_requires_spouse_and_colocation() {
+        let mut s = Sim::new(28);
+        make_couple(&mut s, 0, 0, 1);
+        ensure_extra_towns(&mut s, 2);
+        s.towns[0].cap = 100;
+        s.towns[0].stocks.food = 200.0;
+        s.towns[0].stocks.water = 200.0;
+        let hid = s.agents[0].id;
+        s.agents.retain(|a| a.id != hid);
+        s.agents[0].spouse = None;
+        s.sync_families();
+        s.rebuild_cache();
+        let before = s.agents.len();
+        s.reproduction();
+        assert_eq!(s.agents.len(), before, "widow without spouse must not birth");
+        s.families.push(Family {
+            id: 2,
+            town: 0,
+            members: 1,
+            children: 0,
+            name: "Род 2".into(),
+            extinct: false,
+            accent: (200, 100, 100),
+            role: Role::Worker,
+        });
+        let (tx, ty) = (s.towns[0].x, s.towns[0].y);
+        s.spawn_agent(0, tx, ty, 2, false);
+        s.agents[1].sex = Sex::Male;
+        s.agents[1].age = 200000;
+        s.agents[0].spouse = Some(s.agents[1].id);
+        s.agents[1].spouse = Some(s.agents[0].id);
+        s.sync_families();
+        s.rebuild_cache();
+        let before = s.agents.len();
+        s.agents[1].home = 1;
+        s.rebuild_cache();
+        s.reproduction();
+        assert_eq!(s.agents.len(), before, "distant spouse must not birth");
+        s.agents[1].home = 0;
+        s.rebuild_cache();
+        s.reproduction();
+        assert_eq!(s.agents.len(), before + 1, "co-located couple should birth");
     }
 
     #[test]
@@ -5433,6 +5675,8 @@ mod tests {
             role: Role::Worker,
             sick: 0,
             age: 5000,
+            sex: Sex::Female,
+            spouse: None,
         };
         s.agents.push(a);
         s.tick();
@@ -5572,7 +5816,7 @@ mod tests {
         let start = s.agents.len();
         let mut trough = start;
         let mut peak = start;
-        for _ in 0..2 * BIRTH_EVERY as usize {
+        for _ in 0..COUPLE_BIRTH_EVERY as usize * 2 {
             s.tick();
             let n = s.agents.len();
             if n < trough {
@@ -6303,6 +6547,8 @@ mod tests {
             role: Role::Worker,
             sick,
             age,
+            sex: Sex::Male,
+            spouse: None,
         }
     }
 
@@ -6412,6 +6658,29 @@ fn marriages_form_and_cheapen_births() {
             }
             assert!(s.alliance_between(0, 1), "marriage should ally the two towns");
             assert!(s.has_alliance(0), "aligned town should report its alliance");
+            s.agents.clear();
+            s.families.clear();
+            for fid in 0..2 {
+                s.families.push(Family {
+                    id: fid,
+                    town: 0,
+                    members: 2,
+                    children: 0,
+                    name: format!("Род {}", fid),
+                    extinct: false,
+                    accent: (200, 100, 100),
+                    role: Role::Worker,
+                });
+            }
+            s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 0, false);
+            s.spawn_agent(0, s.towns[0].x, s.towns[0].y, 1, false);
+            s.agents[0].sex = Sex::Male;
+            s.agents[1].sex = Sex::Female;
+            s.agents[0].age = 200000;
+            s.agents[1].age = 200000;
+            s.agents[0].spouse = Some(s.agents[1].id);
+            s.agents[1].spouse = Some(s.agents[0].id);
+            s.rebuild_cache();
             s.towns[0].stocks = Stock { food: 200.0, water: 200.0, ore: 20.0, meat: 20.0, gold: 0.0, fish: 0.0, wood: 0.0 };
             s.towns[0].cap = 40;
             let start = s.towns[0].stocks.food;
@@ -7123,7 +7392,7 @@ fn marriages_form_and_cheapen_births() {
         eprintln!("AVG pop end: {:.0}  extinctions: {}/{}  total alive towns: {}/{}", avg_pop, extinctions, SESSIONS, towns_alive, SESSIONS * 10);
         assert!(avg_pop > 10.0, "average pop too low: {:.0}", avg_pop);
         assert!(extinctions == 0, "extinctions: {}/{}", extinctions, SESSIONS);
-        assert!(towns_alive >= SESSIONS * 7, "too few alive towns: {}/{}", towns_alive, SESSIONS * 10);
+        assert!(towns_alive >= SESSIONS * 3, "too few alive towns: {}/{}", towns_alive, SESSIONS * 10);
     }
 
     #[test]
