@@ -206,6 +206,20 @@ fn paint_swamp(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     }
 }
 
+fn paint_berries(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
+    fill(buf, ax, ay, ART, ART, 82, 148, 66);
+    let h = hash2(x, y);
+    fill(buf, ax + 1 + (h % 2) as usize, ay + 1, 2, 2, 40, 108, 40);
+    fill(buf, ax + 3 + ((h >> 3) % 2) as usize, ay + 2, 3, 2, 52, 122, 48);
+    if (h >> 5) % 3 != 0 {
+        set_px(buf, ax + (h >> 7) as usize % 4, ay + ((h >> 9) % 6) as usize, 200, 46, 70);
+        set_px(buf, ax + (h >> 11) as usize % 4, ay + ((h >> 13) % 6) as usize, 226, 66, 96);
+    }
+    if (h >> 15) % 5 == 0 {
+        set_px(buf, ax + (h >> 17) as usize % 4, ay + ((h >> 19) % 6) as usize, 180, 40, 60);
+    }
+}
+
 fn paint_volcano(buf: &mut [u8], ax: usize, ay: usize, x: i32, y: i32) {
     fill(buf, ax, ay, ART, ART, 60, 50, 55);
     let h = hash2(x, y);
@@ -247,6 +261,7 @@ pub fn draw_terrain(ctx: &CanvasRenderingContext2d, sim: &Sim) {
                 Terrain::Tundra => paint_tundra(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Jungle => paint_jungle(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Swamp => paint_swamp(&mut buf, ax, ay, x as i32, y as i32),
+                Terrain::Berries => paint_berries(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::Volcano => paint_volcano(&mut buf, ax, ay, x as i32, y as i32),
                 Terrain::CoralReef => paint_coral_reef(&mut buf, ax, ay, x as i32, y as i32),
             }
@@ -699,7 +714,7 @@ pub fn draw(
     for y in 0..H {
         for x in 0..W {
             let c = &sim.grid[y * W + x];
-            if (c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle) && c.food < 3.0 {
+            if (c.terrain == Terrain::Forest || c.terrain == Terrain::Jungle) && c.wood < 3.0 {
                 ctx.fill_rect(x as f64 * CELL, y as f64 * CELL, CELL, CELL);
             }
         }
@@ -1391,7 +1406,7 @@ for a in &sim.animals {
             if lib > 0 { p.push(format!("  📚 Library  ({}) +1.5 sci/tick", lib)); }
             if temple > 0 { p.push(format!("  🛕 Temple   ({}) priests, +faith", temple)); }
             if warehouse > 0 { p.push(format!("  📦 Warehouse ({}) +40 food/water, +25 ore, +20 meat/fish, +30 wood, +100 gold", warehouse)); }
-            if sawmill > 0 { p.push(format!("  🪚 Sawmill   ({}) +0.8 wood/tick", sawmill)); }
+            if sawmill > 0 { p.push(format!("  🪚 Sawmill   ({}) +0.5 wood per chop", sawmill)); }
             if fence > 0 { p.push(format!("  🪵 Fence     ({}) +0.05 def, +3 territory", fence)); }
             if outpost > 0 { p.push(format!("  🗼 Outpost   ({}) +5 territory", outpost)); }
             p.push(String::new());
