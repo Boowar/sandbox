@@ -565,6 +565,21 @@ fn draw_caravan(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64) {
     ctx.fill_rect(cx + 3.0, cy, 1.0, 1.0);
 }
 
+fn draw_trader(ctx: &CanvasRenderingContext2d, cx: f64, cy: f64) {
+    ctx.set_fill_style_str("rgba(0,0,0,0.15)");
+    ctx.fill_rect(cx, cy + 6.0, 7.0, 1.0);
+    ctx.set_fill_style_str("rgb(120,60,160)");
+    ctx.fill_rect(cx + 1.0, cy + 1.0, 5.0, 2.0);
+    ctx.set_fill_style_str("rgb(255,200,120)");
+    ctx.fill_rect(cx + 2.0, cy, 3.0, 1.0);
+    ctx.set_fill_style_str("rgb(80,50,140)");
+    ctx.fill_rect(cx + 1.0, cy + 3.0, 5.0, 3.0);
+    ctx.set_fill_style_str("rgb(255,222,120)");
+    ctx.fill_rect(cx + 2.0, cy + 4.0, 2.0, 1.0);
+    ctx.set_fill_style_str("rgb(70,80,200)");
+    ctx.fill_rect(cx + 4.0, cy + 4.0, 2.0, 1.0);
+}
+
 fn draw_scaffold(
     ctx: &CanvasRenderingContext2d,
     px: f64,
@@ -985,6 +1000,21 @@ for a in &sim.animals {
         draw_caravan(&ctx, c.x as f64 * CELL, c.y as f64 * CELL);
     }
 
+    for t in &sim.traders {
+        let tx = sim.towns[t.target].x as f64 * CELL + 4.0;
+        let ty = sim.towns[t.target].y as f64 * CELL + 4.0;
+        let cx = t.x as f64 * CELL + 4.0;
+        let cy = t.y as f64 * CELL + 4.0;
+        ctx.set_stroke_style_str("rgba(200,140,240,0.4)");
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.move_to(cx, cy);
+        ctx.line_to(tx, ty);
+        ctx.stroke();
+        ctx.set_line_width(1.0);
+        draw_trader(&ctx, t.x as f64 * CELL, t.y as f64 * CELL);
+    }
+
     ctx.set_fill_style_str("rgba(140,120,90,0.35)");
     for y in 0..H {
         for x in 0..W {
@@ -1132,7 +1162,7 @@ for a in &sim.animals {
         town_rows.push((row, i));
     }
     if hud.show_caravans {
-        lines.push(format!("🐫 caravan {}", sim.caravans.len()));
+        lines.push(format!("🐫 caravan {} 🧑‍🌾 trader {}", sim.caravans.len(), sim.traders.len()));
         line_colors.push(None);
     }
 

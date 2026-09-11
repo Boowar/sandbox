@@ -142,6 +142,15 @@ const EXPORT_FISH: f32 = 12.0;
 const BUY_FISH_AT: f32 = 5.0;
 const BUY_WOOD_AT: f32 = 8.0;
 
+const TRADER_EVERY: u64 = SEASON_LEN;
+const TRADER_MAX: usize = 12;
+const TRADER_VISIT: u64 = DAY_LEN * 2;
+const TRADER_STOCK_FOOD: f32 = 20.0;
+const TRADER_STOCK_WATER: f32 = 12.0;
+const TRADER_STOCK_ORE: f32 = 8.0;
+const TRADER_STOCK_MEAT: f32 = 6.0;
+const TRADER_STOCK_FISH: f32 = 6.0;
+
 const FARM_COST: f32 = 30.0;
 const FARM_PATCH: usize = 16;
 const FARM_FOOD_MAX: f32 = 8.0;
@@ -804,6 +813,16 @@ pub struct Caravan {
     pub gift: bool,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Trader {
+    pub target: usize,
+    pub x: i32,
+    pub y: i32,
+    pub arrived: bool,
+    pub visit_left: u64,
+    pub goods: Vec<(ResourceKind, f32)>,
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct SocialLink {
     pub a: u32,
@@ -830,6 +849,7 @@ pub struct Sim {
     pub empires: Vec<Empire>,
     pub animals: Vec<Animal>,
     pub caravans: Vec<Caravan>,
+    pub traders: Vec<Trader>,
     pub roads: Vec<bool>,
     pub territory: Vec<i8>,
     pub social_links: Vec<SocialLink>,
@@ -885,6 +905,7 @@ impl Sim {
             empires: Vec::new(),
             animals: Vec::new(),
             caravans: Vec::new(),
+            traders: Vec::new(),
             roads: vec![false; W * H],
             territory: vec![-1; W * H],
             social_links: Vec::new(),
@@ -1728,6 +1749,113 @@ impl Sim {
         self.caravans.retain(|c| !c.goods.is_empty());
     }
 
+    fn trader_step(&mut self) {
+        if self.tick_count % TRADER_EVERY == 0 {
+            for ti in 0..self.towns.len() {
+                if self.traders.len() >= TRADER_MAX {
+                    break;
+                }
+                if !self.towns[ti].alive || self.towns[ti].at_war {
+                    continue;
+                }
+                let t = &self.towns[ti];
+                let (tx, ty) = (t.x, t.y);
+                let epoch = self.tick_count / SEASON_LEN;
+                let h = self.brain(tx, ty, epoch ^ 0x51ed_270b);
+                let mut x = tx;
+                let mut y = ty;
+                for k in 0..8 {
+                    let ang = ((h + k * 9973) % 360) as f64 * std::f64::consts::PI / 180.0;
+                    let dist = 12.0 + ((h >> (k % 7)) & 7) as f64;
+                    let nx = tx + (ang.cos() * dist).round() as i32;
+                    let ny = ty + (ang.sin() * dist).round() as i32;
+                    if in_bounds(nx, ny) && self.grid[idx(nx, ny)].terrain.walkable() {
+                        x = nx;
+                        y = ny;
+                        break;
+                    }
+                }
+                let goods = vec![
+                    (ResourceKind::Food, TRADER_STOCK_FOOD),
+                    (ResourceKind::Water, TRADER_STOCK_WATER),
+                    (ResourceKind::Ore, TRADER_STOCK_ORE),
+                    (ResourceKind::Meat, TRADER_STOCK_MEAT),
+                    (ResourceKind::Fish, TRADER_STOCK_FISH),
+                ];
+                self.traders.push(Trader { target: ti, x, y, arrived: false, visit_left: 0, goods });
+            }
+        }
+        for i in 0..self.traders.len() {
+            let ti = self.traders[i].target;
+            if ti >= self.towns.len() || !self.towns[ti].alive {
+                continue;
+            }
+            let (tx, ty) = (self.towns[ti].x, self.towns[ti].y);
+            if !self.traders[i].arrived {
+                if self.cheb(self.traders[i].x, self.traders[i].y, tx, ty) <= 1 {
+                    self.traders[i].arrived = true;
+                    self.traders[i].visit_left = TRADER_VISIT;
+                } else {
+                    let (nx, ny) = self.caravan_step(self.traders[i].x, self.traders[i].y, tx, ty);
+                    self.traders[i].x = nx;
+                    self.traders[i].y = ny;
+                }
+            }
+        }
+        for i in (0..self.traders.len()).rev() {
+            let tr = &mut self.traders[i];
+            if !tr.arrived || tr.visit_left == 0 || tr.goods.is_empty() {
+                if tr.arrived {
+                    tr.visit_left = tr.visit_left.saturating_sub(1);
+                }
+                continue;
+            }
+            let ti = tr.target;
+            if ti >= self.towns.len() || !self.towns[ti].alive {
+                tr.visit_left = 0;
+                continue;
+            }
+            let gold = self.towns[ti].stocks.gold;
+            if gold > 0.0 {
+                let has_commerce = self.towns[ti].researched.contains(&Tech::Commerce);
+                let mult = if has_commerce { 0.8 } else { 1.0 };
+                for gi in 0..tr.goods.len() {
+                    let (kind, have) = tr.goods[gi];
+                    if have < 1.0 {
+                        continue;
+                    }
+                    let need = match kind {
+                        ResourceKind::Food => self.towns[ti].stocks.food < BUY_FOOD_AT,
+                        ResourceKind::Water => self.towns[ti].stocks.water < BUY_WATER_AT,
+                        ResourceKind::Ore => self.towns[ti].stocks.ore < BUY_ORE_AT,
+                        ResourceKind::Meat => self.towns[ti].stocks.meat < BUY_MEAT_AT,
+                        ResourceKind::Fish => self.towns[ti].stocks.fish < BUY_FISH_AT,
+                        _ => false,
+                    };
+                    if !need {
+                        continue;
+                    }
+                    let price = trade_price(kind) * mult;
+                    if self.towns[ti].stocks.gold < price {
+                        continue;
+                    }
+                    self.towns[ti].stocks.gold -= price;
+                    let cap = stock_cap(&self.towns[ti].built, kind);
+                    self.towns[ti].stocks.add_clamped(kind, 1.0, cap);
+                    tr.goods[gi].1 -= 1.0;
+                }
+            }
+            tr.visit_left -= 1;
+        }
+        self.traders.retain(|tr| {
+            if !tr.arrived {
+                true
+            } else {
+                tr.visit_left > 0 && tr.goods.iter().any(|(_, q)| *q >= 1.0)
+            }
+        });
+    }
+
     fn caravan_step(&self, x: i32, y: i32, tx: i32, ty: i32) -> (i32, i32) {
         let mut best = (x, y);
         let mut bs = i32::MIN;
@@ -2266,7 +2394,7 @@ impl Sim {
             let season_crop = farm_season_mult(self.season);
             let fish_mult = match self.season {
                 Season::Spring => 2.0,
-                Season::Winter => 0.25,
+                Season::Winter => 1.0,
                 _ => 1.0,
             };
             let weather_farm = match self.weather {
@@ -2536,6 +2664,7 @@ impl Sim {
         self.construction();
         self.animals_step();
         self.caravans_step();
+        self.trader_step();
         self.market_buy();
         self.export_caravans();
         let spatial = self.build_spatial();
@@ -4116,6 +4245,7 @@ impl Sim {
             }
         }
         self.caravans.retain(|c| c.home != ti && c.target != ti);
+        self.traders.retain(|t| t.target != ti);
     }
 
     fn meteor_step(&mut self) {
@@ -6766,7 +6896,7 @@ mod tests {
     }
 
     #[test]
-    fn fish_spawns_in_spring_and_rain_and_wanes_in_winter() {
+    fn fish_spawns_in_spring_rain_and_winter_fishing_keeps_working() {
         let mut s = Sim::new(411);
         s.agents.clear();
         s.weather = Weather::Clear;
@@ -6789,7 +6919,7 @@ mod tests {
         }
         s.tick();
         let winter = s.grid[wx].food;
-        assert!(winter <= 2.0, "winter should starve fish (got {})", winter);
+        assert!(winter >= 5.0, "winter fishing should still work (got {})", winter);
         s.weather = Weather::Rain;
         s.tick_count = 4 * SEASON_LEN + 1;
         s.season = Season::Winter;
@@ -7006,6 +7136,38 @@ mod tests {
             s.towns[0].stocks.gold < 200.0,
             "buying should spend gold"
         );
+    }
+
+    #[test]
+    fn trader_visits_town_each_season_and_sells_goods() {
+        let mut s = Sim::new(777);
+        for t in s.towns.iter_mut() {
+            t.alive = true;
+            t.stocks.gold = 300.0;
+            t.stocks.food = 4.0;
+            t.stocks.water = 5.0;
+            t.stocks.ore = 6.0;
+        }
+        s.agents.retain(|a| a.home == 0);
+        s.tick_count = 0;
+        let mut saw_trader = false;
+        let mut sold = false;
+        for _ in 0..TRADER_EVERY * 3 {
+            s.tick();
+            if !s.traders.is_empty() {
+                saw_trader = true;
+            }
+            let f = s.towns[0].stocks.food;
+            if f > 5.0f32 {
+                sold = true;
+            }
+            if sold {
+                break;
+            }
+        }
+        assert!(saw_trader, "a trader should visit the town each season");
+        assert!(sold, "town should buy food from a visiting trader");
+        assert!(s.towns[0].stocks.gold < 300.0, "buying should spend gold");
     }
 
     fn build_migration_world(seed: u64) -> Sim {
