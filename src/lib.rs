@@ -654,7 +654,7 @@ pub fn start() -> Result<(), JsValue> {
         _btn_build: btn_build.clone(),
         _btn_road: btn_road.clone(),
         speed_lbl,
-        speed: 2.0,
+        speed: 20.0,
         acc: 0.0,
         last: Date::now(),
         fps_frames: 0,
